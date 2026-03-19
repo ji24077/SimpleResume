@@ -1,0 +1,8 @@
+api/.venv/
+api/.env
+web/.env.local
+web/.next/
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store
