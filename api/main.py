@@ -19,6 +19,7 @@ from compile_pdf import (
     compiler_available,
     normalize_to_dhruv_template,
     sanitize_latex_for_overleaf,
+    sanitize_unicode_for_latex,
 )
 from prompts import build_system_prompt
 
@@ -171,7 +172,9 @@ def _run_generate(raw: str) -> GenerateResponse:
             status_code=502,
             detail="Model did not return a valid latex_document.",
         )
-    latex = sanitize_latex_for_overleaf(normalize_to_dhruv_template(latex))
+    latex = sanitize_latex_for_overleaf(
+        sanitize_unicode_for_latex(normalize_to_dhruv_template(latex))
+    )
 
     preview_raw = data.get("preview_sections") or []
     coaching_raw = data.get("coaching") or []
@@ -269,8 +272,10 @@ class CompilePdfBody(BaseModel):
 @app.post("/compile-pdf")
 def compile_pdf_endpoint(body: CompilePdfBody):
     """Real LaTeX → PDF (Overleaf-style preview). Requires pdflatex or tectonic on server."""
-    tex = sanitize_latex_for_overleaf(normalize_to_dhruv_template(body.latex_document.strip()))
-    pdf, err = compile_latex_to_pdf(tex)
+    tex = sanitize_latex_for_overleaf(
+        sanitize_unicode_for_latex(normalize_to_dhruv_template(body.latex_document.strip()))
+    )
+    pdf, err_detail = compile_latex_to_pdf(tex)
     if pdf:
         return Response(content=pdf, media_type="application/pdf")
-    raise HTTPException(status_code=422, detail=err[:6000] if err else "Compile failed")
+    raise HTTPException(status_code=422, detail=err_detail or {"code": "COMPILE_FAILED", "message": "Compile failed"})

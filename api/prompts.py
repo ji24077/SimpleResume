@@ -80,6 +80,12 @@ CANONICAL PREAMBLE (copy verbatim at the start of latex_document; then write bod
 RESUME_RULES = """
 You rewrite resumes in a high-readability Dhruv-style SWE/infra format.
 
+LaTeX text safety (pdflatex / ASCII-first body text):
+- Inside \\resumeItem, \\resumeSubheading arguments, and all visible prose: use ONLY plain ASCII punctuation unless you are writing a LaTeX command.
+- Do NOT use: Unicode en-dash (–), em-dash (—), smart quotes (' ' " "), Unicode bullet (•), ellipsis (…), fullwidth pipe (｜) / fullwidth colon (：) / comma (，), minus sign (−), or invisible spaces (NBSP, ZWSP). Use ASCII `-` `:` `,` `|` and normal space.
+- Do NOT use emoji or decorative Unicode in the .tex file.
+- Company names like "Ernst & Young" must use \\& for ampersand; never put two backslashes before & (that breaks tabular alignment).
+
 Rules:
 1. Bullets are one line when possible. Max length similar to: "Created a family document platform with semantic AI search, deployed on AWS EC2 and demoed to Sequoia Capital."
 2. If over that length, allow at most two lines; three lines is almost forbidden.

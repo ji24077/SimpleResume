@@ -107,7 +107,11 @@ export default function Home() {
         if (cancelled) return;
         if (!res.ok) {
           const j = await res.json().catch(() => ({}));
-          setPdfError(typeof j.detail === "string" ? j.detail : "PDF compile failed");
+          setPdfError(
+            typeof j.detail === "string"
+              ? j.detail
+              : JSON.stringify(j.detail ?? {}, null, 2)
+          );
           return;
         }
         const blob = await res.blob();
