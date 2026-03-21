@@ -1,7 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import dynamic from "next/dynamic";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { GenerateResponse } from "@/lib/types";
+
+const PdfJsPreview = dynamic(() => import("@/components/PdfJsPreview"), {
+  ssr: false,
+  loading: () => <p className="py-8 text-center text-sm text-zinc-500">Loading PDF viewer…</p>,
+});
 
 type BackendHealth = {
   ok?: boolean;
@@ -9,6 +15,12 @@ type BackendHealth = {
   env_hint?: string;
   error?: string;
   pdf_compile?: boolean;
+  compiler?: {
+    latexmk?: boolean;
+    latex_docker_ready?: boolean;
+    latex_docker_image?: string | null;
+    docker?: boolean;
+  };
 };
 
 const KIND_LABEL: Record<string, string> = {
@@ -61,12 +73,21 @@ function downloadCoachingMd(data: GenerateResponse) {
   URL.revokeObjectURL(a.href);
 }
 
+const EMPTY_LATEX_SHELL: GenerateResponse = {
+  latex_document: "",
+  preview_sections: [],
+  coaching: [],
+};
+
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [paste, setPaste] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<GenerateResponse | null>(null);
+  /** Working copy edited in the LaTeX tab; sent to /compile-pdf when Compile runs */
+  const [latexDraft, setLatexDraft] = useState("");
+  const latexDraftRef = useRef("");
   const [tab, setTab] = useState<"preview" | "coaching" | "latex">("preview");
   const [health, setHealth] = useState<BackendHealth | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
@@ -74,7 +95,13 @@ export default function Home() {
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [showTextPreview, setShowTextPreview] = useState(false);
-  const [pdfRefresh, setPdfRefresh] = useState(0);
+  /** Bump to compile current latexDraft (Overleaf-style manual build) */
+  const [compileNonce, setCompileNonce] = useState(0);
+  const [latexOnlyBootstrap, setLatexOnlyBootstrap] = useState("");
+
+  useEffect(() => {
+    latexDraftRef.current = latexDraft;
+  }, [latexDraft]);
 
   useEffect(() => {
     fetch("/api/backend-health")
@@ -84,13 +111,18 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!result?.latex_document) {
-      setPdfUrl(null);
-      setPdfBlob(null);
-      setPdfError(null);
-      setPdfLoading(false);
+    if (compileNonce === 0) {
       return;
     }
+    const source = latexDraftRef.current;
+    if (!source.trim()) {
+      setPdfLoading(false);
+      setPdfError("LaTeX is empty. Paste or generate a document, then Compile.");
+      setPdfUrl(null);
+      setPdfBlob(null);
+      return;
+    }
+
     let cancelled = false;
     let objectUrl: string | null = null;
     setPdfLoading(true);
@@ -101,7 +133,7 @@ export default function Home() {
     fetch("/api/compile-pdf", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ latex_document: result.latex_document }),
+      body: JSON.stringify({ latex_document: source }),
     })
       .then(async (res) => {
         if (cancelled) return;
@@ -131,7 +163,7 @@ export default function Home() {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [result?.latex_document, pdfRefresh]);
+  }, [compileNonce]);
 
   const canSubmit = Boolean(file || paste.trim());
 
@@ -157,7 +189,11 @@ export default function Home() {
         setError(typeof json.detail === "string" ? json.detail : JSON.stringify(json.detail || json) || res.statusText);
         return;
       }
-      setResult(json as GenerateResponse);
+      const gen = json as GenerateResponse;
+      setResult(gen);
+      setLatexDraft(gen.latex_document);
+      latexDraftRef.current = gen.latex_document;
+      setCompileNonce((n) => n + 1);
       setTab("preview");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Request failed");
@@ -172,10 +208,43 @@ export default function Home() {
     setPdfBlob(null);
     setPdfError(null);
     setResult(null);
+    setLatexDraft("");
+    latexDraftRef.current = "";
+    setCompileNonce(0);
     setFile(null);
     setPaste("");
     setError(null);
+    setLatexOnlyBootstrap("");
   };
+
+  const runCompile = useCallback(() => {
+    setCompileNonce((n) => n + 1);
+  }, []);
+
+  const startLatexOnly = useCallback(() => {
+    const t = latexOnlyBootstrap.trim();
+    if (!t) {
+      setError("Paste a full LaTeX source first.");
+      return;
+    }
+    if (!t.includes("\\documentclass")) {
+      setError("LaTeX must include \\documentclass{...}.");
+      return;
+    }
+    setError(null);
+    latexDraftRef.current = t;
+    setLatexDraft(t);
+    setResult({
+      ...EMPTY_LATEX_SHELL,
+      latex_document: t,
+    });
+    setCompileNonce((n) => n + 1);
+    setTab("preview");
+  }, [latexOnlyBootstrap]);
+
+  const isLatexOnlySession =
+    result != null && result.preview_sections.length === 0 && result.coaching.length === 0;
+  const draftDiffersFromSaved = result != null && latexDraft !== result.latex_document;
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -204,7 +273,18 @@ export default function Home() {
                   </p>
                 )}
                 {health.ok && health.openai_configured && (
-                  <p className="text-emerald-500/90">API · OpenAI 연결됨</p>
+                  <p className="text-emerald-500/90">
+                    API · OpenAI 연결됨
+                    {health.compiler?.latex_docker_ready && (
+                      <span className="ml-2 text-zinc-500">
+                        · PDF: Docker (
+                        <code className="rounded bg-zinc-800 px-1">{health.compiler.latex_docker_image}</code>)
+                      </span>
+                    )}
+                    {health.compiler && !health.compiler.latex_docker_ready && health.compiler.latexmk && (
+                      <span className="ml-2 text-zinc-500">· PDF: latexmk</span>
+                    )}
+                  </p>
                 )}
               </div>
             )}
@@ -258,6 +338,33 @@ export default function Home() {
                 {loading ? "Generating… (can take 30–90s)" : "Generate resume"}
               </button>
             </div>
+
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-8">
+              <h2 className="mb-2 text-sm font-medium text-zinc-300">2. Or: LaTeX only (Overleaf-style)</h2>
+              <p className="mb-4 text-sm text-zinc-500">
+                Paste a complete <code className="rounded bg-zinc-800 px-1">.tex</code> file, then <strong>Compile</strong>{" "}
+                for PDF preview — no AI step.
+              </p>
+              <textarea
+                value={latexOnlyBootstrap}
+                onChange={(e) => {
+                  setLatexOnlyBootstrap(e.target.value);
+                  setError(null);
+                }}
+                spellCheck={false}
+                placeholder="% Paste full LaTeX here (must include \\documentclass)…"
+                rows={12}
+                className="w-full resize-y rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-3 font-mono text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-amber-600 focus:outline-none focus:ring-1 focus:ring-amber-600"
+              />
+              <button
+                type="button"
+                onClick={startLatexOnly}
+                disabled={!latexOnlyBootstrap.trim()}
+                className="mt-4 w-full rounded-xl border border-amber-700 bg-amber-950/40 py-3 text-sm font-medium text-amber-200 transition hover:bg-amber-950/70 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Open editor &amp; compile
+              </button>
+            </div>
           </div>
         ) : (
           <div className="space-y-6">
@@ -271,7 +378,7 @@ export default function Home() {
               </button>
               <button
                 type="button"
-                onClick={() => downloadTex(result.latex_document)}
+                onClick={() => downloadTex(latexDraft || result.latex_document)}
                 className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500"
               >
                 Download .tex
@@ -285,13 +392,15 @@ export default function Home() {
                   Download PDF
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => downloadCoachingMd(result)}
-                className="rounded-lg border border-emerald-700 px-3 py-1.5 text-sm text-emerald-400 hover:bg-emerald-950/50"
-              >
-                Download coaching (.md)
-              </button>
+              {!isLatexOnlySession && (
+                <button
+                  type="button"
+                  onClick={() => downloadCoachingMd(result)}
+                  className="rounded-lg border border-emerald-700 px-3 py-1.5 text-sm text-emerald-400 hover:bg-emerald-950/50"
+                >
+                  Download coaching (.md)
+                </button>
+              )}
             </div>
 
             <div className="flex gap-1 rounded-lg bg-zinc-900 p-1">
@@ -300,9 +409,10 @@ export default function Home() {
                   key={t}
                   type="button"
                   onClick={() => setTab(t)}
+                  disabled={isLatexOnlySession && t === "coaching"}
                   className={`flex-1 rounded-md py-2 text-sm font-medium capitalize transition ${
                     tab === t ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300"
-                  }`}
+                  } ${isLatexOnlySession && t === "coaching" ? "cursor-not-allowed opacity-40" : ""}`}
                 >
                   {t === "latex" ? "LaTeX" : t}
                 </button>
@@ -312,23 +422,28 @@ export default function Home() {
             {tab === "preview" && (
               <div className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-medium text-zinc-300">PDF preview (LaTeX → pdflatex, Overleaf-style)</p>
+                  <p className="text-sm font-medium text-zinc-300">
+                    PDF preview — edit in <strong className="text-zinc-200">LaTeX</strong> tab, then{" "}
+                    <strong className="text-amber-300">Compile</strong> (Overleaf-style)
+                  </p>
                   <div className="flex flex-wrap items-center gap-3">
                     <button
                       type="button"
-                      onClick={() => setPdfRefresh((n) => n + 1)}
-                      disabled={pdfLoading}
-                      className="text-xs text-amber-400 hover:underline disabled:opacity-40"
+                      onClick={runCompile}
+                      disabled={pdfLoading || !latexDraft.trim()}
+                      className="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-amber-950 hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-40"
                     >
-                      PDF 다시 빌드
+                      Compile
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowTextPreview((v) => !v)}
-                      className="text-xs text-emerald-400 hover:underline"
-                    >
-                      {showTextPreview ? "Hide text list" : "Show plain text list"}
-                    </button>
+                    {!isLatexOnlySession && (
+                      <button
+                        type="button"
+                        onClick={() => setShowTextPreview((v) => !v)}
+                        className="text-xs text-emerald-400 hover:underline"
+                      >
+                        {showTextPreview ? "Hide text list" : "Show plain text list"}
+                      </button>
+                    )}
                   </div>
                 </div>
                 {pdfLoading && (
@@ -339,22 +454,28 @@ export default function Home() {
                     <p className="font-medium text-amber-200">PDF 미리보기 불가</p>
                     <p className="mt-2 whitespace-pre-wrap font-mono text-xs text-zinc-400">{pdfError.slice(0, 2000)}</p>
                     <p className="mt-3 text-xs text-zinc-500">
-                      Mac: <code className="rounded bg-zinc-800 px-1">brew install --cask basictex</code> 후 터미널에서{" "}
-                      <code className="rounded bg-zinc-800 px-1">sudo tlmgr update --self && sudo tlmgr install collection-latexextra</code>
-                      또는 MacTeX 설치. API 서버 재시작 후 다시 Generate.
+                      권장: <code className="rounded bg-zinc-800 px-1">docker compose build texlive</code> 후{" "}
+                      <code className="rounded bg-zinc-800 px-1">LATEX_DOCKER_IMAGE=simpleresume-texlive:full</code> 로 API
+                      실행. 또는 MacTeX/latexmk. README 참고.
                     </p>
                   </div>
                 )}
                 {pdfUrl && !pdfLoading && (
-                  <div className="overflow-hidden rounded-lg border border-zinc-700 bg-white">
-                    <iframe
-                      title="Resume PDF"
-                      src={`${pdfUrl}#toolbar=1`}
-                      className="h-[min(85vh,1100px)] w-full"
-                    />
+                  <div className="space-y-2">
+                    <PdfJsPreview fileUrl={pdfUrl} />
+                    <p className="text-center text-[10px] text-zinc-600">
+                      <a
+                        href={pdfUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-emerald-500/90 underline hover:text-emerald-400"
+                      >
+                        Open PDF in new tab
+                      </a>
+                    </p>
                   </div>
                 )}
-                {showTextPreview && (
+                {showTextPreview && !isLatexOnlySession && (
                   <div className="mt-6 space-y-6 border-t border-zinc-800 pt-6">
                     <p className="text-xs text-zinc-500">Plain bullet list (no LaTeX layout)</p>
                     {result.preview_sections.map((sec, i) => (
@@ -373,11 +494,21 @@ export default function Home() {
                     ))}
                   </div>
                 )}
+                {showTextPreview && isLatexOnlySession && (
+                  <p className="mt-4 text-xs text-zinc-600">Plain-text list is available after AI Generate (not in LaTeX-only mode).</p>
+                )}
               </div>
             )}
 
             {tab === "coaching" && (
               <div className="space-y-8 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6">
+                {isLatexOnlySession ? (
+                  <p className="text-sm text-zinc-500">
+                    Coaching appears when you use <strong className="text-zinc-400">Generate resume</strong>. LaTeX-only
+                    mode is compile + preview only.
+                  </p>
+                ) : (
+                  <>
                 <p className="text-sm text-zinc-400">
                   Why each section and bullet is stronger — recruiter scan + credibility.
                 </p>
@@ -411,13 +542,51 @@ export default function Home() {
                     </section>
                   );
                 })}
+                  </>
+                )}
               </div>
             )}
 
             {tab === "latex" && (
-              <pre className="max-h-[70vh] overflow-auto rounded-2xl border border-zinc-800 bg-zinc-950 p-4 text-xs leading-relaxed text-emerald-200/80">
-                {result.latex_document}
-              </pre>
+              <div className="space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-medium text-zinc-300">Editor (full .tex)</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {draftDiffersFromSaved && !isLatexOnlySession && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLatexDraft(result.latex_document);
+                          latexDraftRef.current = result.latex_document;
+                        }}
+                        className="rounded-md border border-zinc-600 px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-800"
+                      >
+                        Revert to last Generate
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={runCompile}
+                      disabled={pdfLoading || !latexDraft.trim()}
+                      className="rounded-md bg-amber-600 px-4 py-1.5 text-sm font-medium text-amber-950 hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {pdfLoading ? "Compiling…" : "Compile"}
+                    </button>
+                  </div>
+                </div>
+                {draftDiffersFromSaved && (
+                  <p className="text-xs text-amber-200/80">
+                    Unsaved edits vs. last Generate output — Compile to refresh the PDF preview.
+                  </p>
+                )}
+                <textarea
+                  value={latexDraft}
+                  onChange={(e) => setLatexDraft(e.target.value)}
+                  spellCheck={false}
+                  className="min-h-[min(70vh,720px)] w-full resize-y rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-3 font-mono text-xs leading-relaxed text-emerald-100/90 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
+                  placeholder="\\documentclass{article} ..."
+                />
+              </div>
             )}
           </div>
         )}

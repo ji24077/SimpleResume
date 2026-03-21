@@ -1,0 +1,13 @@
+# Optional: build the fixed TeX environment for API compile (Docker + latexmk).
+#
+#   docker compose build texlive
+#   export LATEX_DOCKER_IMAGE=simpleresume-texlive:full
+#
+# API must be able to run `docker` (Docker Desktop / colima).
+
+services:
+  texlive:
+    build:
+      context: .
+      dockerfile: docker/texlive-full/Dockerfile
+    image: simpleresume-texlive:full

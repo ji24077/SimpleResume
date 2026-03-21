@@ -2,7 +2,7 @@
 
 \usepackage[utf8]{inputenc}
 \usepackage{latexsym}
-% fullpage omitted: TinyTeX/BasicTeX often lack fullpage.sty; margins below + fancyhdr suffice
+\usepackage[empty]{fullpage}
 \usepackage{titlesec}
 \usepackage{marvosym}
 \usepackage[usenames,dvipsnames]{color}
@@ -13,7 +13,7 @@
 \usepackage[english]{babel}
 \usepackage{tabularx}
 \renewcommand{\baselinestretch}{0.92}
-% \input{glyphtounicode} — omit on Overleaf unless you upload glyphtounicode.tex; avoids compile failure
+\input{glyphtounicode}
 
 \pagestyle{fancy}
 \fancyhf{}
@@ -39,12 +39,7 @@
 }{}{0em}{}[\color{black}\titlerule \vspace{-4pt}]
 
 % Ensure that generated pdf is machine readable/ATS parsable
-% Some engines (e.g. tectonic) may not define \pdfgentounicode.
-\expandafter\ifx\csname pdfgentounicode\endcsname\relax
-% skip
-\else
 \pdfgentounicode=1
-\fi
 
 %-------------------------
 % Custom commands
