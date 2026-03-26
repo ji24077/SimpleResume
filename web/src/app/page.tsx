@@ -246,6 +246,11 @@ export default function Home() {
     result != null && result.preview_sections.length === 0 && result.coaching.length === 0;
   const draftDiffersFromSaved = result != null && latexDraft !== result.latex_document;
 
+  const resumeBuilderRef = useRef<HTMLDivElement>(null);
+  const scrollToResumeBuilder = useCallback(() => {
+    resumeBuilderRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
       <header className="border-b border-zinc-800 bg-zinc-950/80 backdrop-blur">
@@ -253,7 +258,7 @@ export default function Home() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h1 className="text-lg font-semibold tracking-tight text-white">SimpleResume</h1>
-              <p className="text-xs text-zinc-500">Dhruv-style SWE resume → LaTeX + coaching</p>
+              <p className="text-xs text-zinc-500">Big Tech–ready resumes · LaTeX · coaching</p>
             </div>
             {health && (
               <div className="max-w-md text-right text-xs">
@@ -294,7 +299,74 @@ export default function Home() {
 
       <main className="mx-auto max-w-4xl px-4 py-10">
         {!result ? (
-          <div className="space-y-8">
+          <div className="space-y-12">
+            <section
+              className="relative overflow-hidden rounded-3xl border border-zinc-800/80 bg-gradient-to-b from-zinc-900/90 to-zinc-950 px-6 py-12 md:px-10 md:py-16"
+              aria-labelledby="hero-heading"
+            >
+              <div
+                className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-emerald-500/10 blur-3xl"
+                aria-hidden
+              />
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-500/90">
+                Recruiter-tested · SWE / infra
+              </p>
+              <h2
+                id="hero-heading"
+                className="mt-3 max-w-3xl text-3xl font-bold leading-tight tracking-tight text-white md:text-4xl md:leading-tight"
+              >
+                Make sure your resume is{" "}
+                <span className="bg-gradient-to-r from-emerald-300 to-emerald-500 bg-clip-text text-transparent">
+                  Big Tech–ready
+                </span>
+              </h2>
+              <p className="mt-5 max-w-2xl text-base leading-relaxed text-zinc-400 md:text-lg">
+                Your draft is <strong className="text-zinc-200">analyzed</strong> and rewritten into scannable
+                bullets, Dhruv-style LaTeX, section coaching, and a live PDF preview — the same bar we use for
+                top-tier hiring loops.
+              </p>
+              <ul className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:gap-4">
+                <li className="inline-flex items-center gap-2 rounded-full border border-zinc-700/80 bg-zinc-900/60 px-4 py-2 text-sm text-zinc-200">
+                  <span className="text-emerald-400" aria-hidden>
+                    ✓
+                  </span>
+                  <span>
+                    <strong className="font-semibold text-white">30+</strong> candidates coached toward interviews
+                  </span>
+                </li>
+                <li className="inline-flex items-center gap-2 rounded-full border border-zinc-700/80 bg-zinc-900/60 px-4 py-2 text-sm text-zinc-200">
+                  <span className="text-emerald-400" aria-hidden>
+                    ✓
+                  </span>
+                  Metrics, stack, and outcomes — not generic filler
+                </li>
+                <li className="inline-flex items-center gap-2 rounded-full border border-zinc-700/80 bg-zinc-900/60 px-4 py-2 text-sm text-zinc-200">
+                  <span className="text-emerald-400" aria-hidden>
+                    ✓
+                  </span>
+                  Export <strong className="font-semibold text-white">.tex</strong>, coaching{" "}
+                  <strong className="font-semibold text-white">.md</strong>, PDF
+                </li>
+              </ul>
+              <div className="mt-10 flex flex-wrap items-center gap-4">
+                <button
+                  type="button"
+                  onClick={scrollToResumeBuilder}
+                  className="inline-flex items-center justify-center rounded-xl bg-emerald-500 px-6 py-3.5 text-sm font-semibold text-emerald-950 shadow-lg shadow-emerald-900/30 transition hover:bg-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-zinc-950"
+                >
+                  Build your resume
+                </button>
+                <button
+                  type="button"
+                  onClick={scrollToResumeBuilder}
+                  className="text-sm font-medium text-zinc-400 underline-offset-4 transition hover:text-zinc-200 hover:underline"
+                >
+                  Upload, paste, or paste LaTeX below →
+                </button>
+              </div>
+            </section>
+
+            <div ref={resumeBuilderRef} id="resume-builder" className="scroll-mt-6 space-y-8">
             <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-8">
               <h2 className="mb-2 text-sm font-medium text-zinc-300">1. Upload or paste</h2>
               <p className="mb-6 text-sm text-zinc-500">
@@ -364,6 +436,7 @@ export default function Home() {
               >
                 Open editor &amp; compile
               </button>
+            </div>
             </div>
           </div>
         ) : (
