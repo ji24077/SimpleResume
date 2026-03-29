@@ -29,8 +29,9 @@ CRITICAL — LaTeX shape (must match this project’s canonical template):
    - \\textbf{\\Huge <Name>} \\\\ \\vspace{4pt}
    - \\small phone $|$ \\href{mailto:you@x.com}{you@x.com} $|$ \\href{https://github.com/USER}{GitHub} $|$ \\href{https://linkedin.com/in/...}{LinkedIn} $|$ \\href{https://SITE}{site}
    NEVER \\href{}{Label} (empty URL). Use a real https URL or plain text (no \\href).
+   You MUST close with \\end{center} before any \\section. Then (optional) \\vspace{-7pt} after \\end{center}. Never put \\section{...} inside an unclosed \\begin{center} — pdfLaTeX breaks.
 
-4) Then \\vspace{-7pt}
+4) Then \\vspace{-7pt} (only after \\end{center}, before first \\section)
 
 5) Education block EXACTLY:
    \\section{Education}
@@ -69,7 +70,7 @@ CRITICAL — LaTeX shape (must match this project’s canonical template):
 
 10) End with \\end{document} only once.
 
-11) Optional lines may be commented with % (e.g. old bullets). Every \\resumeItem must use valid LaTeX (escape $, %, &, #, ~).
+11) Optional lines may be commented with % (e.g. old bullets). Every \\resumeItem must use valid LaTeX (escape $, %, &, #, ~). For a literal percent sign in text use a **single** backslash: `\\%`. Never write `\\\\%` (double backslash before %) — it forces a line break and breaks layout.
 
 12) Ampersand in ANY argument of \\resumeSubheading, \\resumeItem, or plain text: use the LaTeX pair backslash-plus-ampersand only (one backslash before &). Example company names: Ernst backslash-ampersand Young. WRONG: two backslashes immediately before & (that is a line-break command then alignment tab — compile error in tabular).
 
@@ -86,26 +87,31 @@ LaTeX text safety (pdflatex / ASCII-first body text):
 - Do NOT use emoji or decorative Unicode in the .tex file.
 - Company names like "Ernst & Young" must use \\& for ampersand; never put two backslashes before & (that breaks tabular alignment).
 
-Rules:
-1. Bullets are one line when possible. Max length similar to: "Created a family document platform with semantic AI search, deployed on AWS EC2 and demoed to Sequoia Capital."
-2. If over that length, allow at most two lines; three lines is almost forbidden.
-3. Max 5 bullets per role/project. Ideal: 3+ one-line bullets + 1–2 two-line bullets.
-4. One message per bullet.
+Rules (one U.S. letter page — aim for **solid density**, not a half-empty page):
+0. The server **compiles your LaTeX to PDF**. If the PDF is **2+ pages**, it will ask for a **small tightening** (shorter wording, tiny `\\vspace`) while **keeping every substantive fact from the source** (education, jobs, projects, skills, contact, awards, etc.) — not wholesale deletion. If the PDF is 1 page but looks empty at the bottom, it may ask you to **densify** from the same source (no new facts). Target roughly **~90-98%** vertical use when the source supports it.
+1. **Use the user's facts — full coverage.** Include **all** distinct content from the source: **Education** (institutions, degrees, dates, honors, coursework, activities as given), **Experience** (every employer, role, internship — one `\\resumeSubheading` each), **Projects** if the source lists them, **Technical Skills** covering **every** language/framework/tool named in the source (group or abbreviate; do not omit), plus certifications, awards, or other facts — map them into the template (or the closest section) rather than dropping them. Do not omit entries to fit the page on the first draft; the server will ask for a mild trim if the PDF is slightly over one page. When detail per role is rich, use **4-5** bullets (hard cap **5**); if thin, **2-3**. Never invent achievements to pad the page.
+2. **Bullet length:** Prefer one tight line (similar max span to: "Created a family document platform with semantic AI search, deployed on AWS EC2 and demoed to Sequoia Capital."). If metrics/stack/outcome need room, allow **up to two lines** per bullet. Three-line bullets are rare and only for unusually high-value facts.
+3. **Fill the page when material exists:** If you would otherwise leave obvious large vertical gaps on a single page, **pull in more concrete details from the source** (metrics, scale, tech, outcomes) across bullets before you cut breadth. Still stay scannable — no walls of text.
+4. One clear message per bullet.
 5. Structure: verb + what you did + tech + outcome.
 6. Bold numbers/metrics with \\textbf{...} inside \\resumeItem.
 7. Do not bold every technology; pick ~1 differentiating niche tech per bullet when it matters (Kubernetes, Redis, CUDA, TensorRT, Elasticsearch, LangChain, XGBoost, NCCL, etc.).
 8. Do NOT usually bold generic stack (Python, SQL, React).
-9. Cut modifiers; compress without losing meaning.
-10. Recruiter must grasp in ~3 seconds; intuitive.
+9. Cut fluff and vague modifiers; keep compression, but **do not strip sourced specifics** just to stay ultra-short.
+10. Recruiter must grasp each bullet in a quick scan; hierarchy stays obvious.
 11. Believable, production-like; no technical contradictions.
-12. Concise but NOT generic — stack, scale, system meaning, outcome must survive.
-13. Output bullets ONLY as \\resumeItem{...} content (LaTeX-escaped: use \\& for &, \\% for %).
+12. Concise but NOT generic — stack, scale, system meaning, outcome must survive in the final bullets.
+13. Education: if the source mentions honors, coursework, GPA, teaching, or notable projects, reflect them in **1-3** \\resumeItem lines; otherwise keep Education compact.
+14. Technical Skills: keep the three-line Languages / Frameworks / Tools shape; **populate densely** from the source (comma-separated clusters), not a bare minimum list.
+15. Output bullets ONLY as \\resumeItem{...} content (LaTeX-escaped: use \\& for &, \\% for %).
 
 Coaching: For each section (Education, each Experience, each Project), explain WHY the rewrite is stronger (scanability, metrics, niche bolding, credibility).
 """
 
 GENERATION_USER_INSTRUCTION = """
 You will receive raw resume text extracted from the user's file.
+
+Assume the goal is **one full, professional letter page** when the source supports it: **retain all information from the source** — every school, job, project, skill, contact line, and fact the user provided (reformat and tighten wording only). Use 4-5 sourced bullets per strong role where facts exist, up to two lines per bullet if needed, and Technical Skills that still list **every** technology from the source. Do not invent content. If the draft is slightly over one page, the server will request a **gentle trim** (wording/spacing), not removal of whole sections or facts.
 
 Return a SINGLE JSON object (no markdown fences) with keys:
 - "latex_document": string — FULL .tex file: EXACT canonical preamble (as specified) from \\documentclass through %%%% RESUME STARTS HERE, then \\begin{document} … \\end{document} in the EXACT structural shape specified (center header, Education, Experience, Technical Skills itemize). Do not output a different template.

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { GenerateResponse } from "@/lib/types";
+import type { GenerateResponse, PagePolicy } from "@/lib/types";
 
 type BackendHealth = {
   ok?: boolean;
@@ -11,6 +11,18 @@ type BackendHealth = {
   error?: string;
   pdf_compile?: boolean;
 };
+
+const LOOKS_LIKE_EMAIL = /\S+@\S+\.\S+/;
+const HAS_LINKEDIN = /linkedin\.com/i;
+
+function pasteContactGaps(paste: string): { needEmail: boolean; needLinkedin: boolean } {
+  const p = paste.trim();
+  if (!p) return { needEmail: false, needLinkedin: false };
+  return {
+    needEmail: !LOOKS_LIKE_EMAIL.test(p),
+    needLinkedin: !HAS_LINKEDIN.test(p),
+  };
+}
 
 const KIND_LABEL: Record<string, string> = {
   education: "Education",
@@ -76,6 +88,11 @@ export default function Home() {
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [showTextPreview, setShowTextPreview] = useState(false);
   const [pdfRefresh, setPdfRefresh] = useState(0);
+  const [pagePolicy, setPagePolicy] = useState<PagePolicy>("strict_one_page");
+  const [progressMessage, setProgressMessage] = useState<string | null>(null);
+  const [contactEmail, setContactEmail] = useState("");
+  const [contactLinkedin, setContactLinkedin] = useState("");
+  const [contactPhone, setContactPhone] = useState("");
 
   const resumeBuilderRef = useRef<HTMLDivElement>(null);
   const scrollToResumeBuilder = useCallback(() => {
@@ -144,33 +161,125 @@ export default function Home() {
   const onSubmit = useCallback(async () => {
     setError(null);
     setLoading(true);
+    setProgressMessage(null);
     setResult(null);
     try {
+      if (!file) {
+        const { needEmail, needLinkedin } = pasteContactGaps(paste);
+        if (needEmail && !contactEmail.trim()) {
+          setError(
+            "원문에서 이메일이 잘 안 보입니다. 아래 ‘연락처’에 이메일을 입력하거나, 원문에 주소를 적어 주세요."
+          );
+          setLoading(false);
+          return;
+        }
+        if (needLinkedin && !contactLinkedin.trim()) {
+          setError(
+            "원문에서 LinkedIn이 잘 안 보입니다. 아래에 프로필 URL을 입력하거나, 원문에 linkedin.com 링크를 넣어 주세요."
+          );
+          setLoading(false);
+          return;
+        }
+      }
+
       let res: Response;
       if (file) {
         const fd = new FormData();
         fd.append("file", file);
-        res = await fetch("/api/generate", { method: "POST", body: fd });
+        fd.append("page_policy", pagePolicy);
+        fd.append("contact_email", contactEmail);
+        fd.append("contact_linkedin", contactLinkedin);
+        fd.append("contact_phone", contactPhone);
+        res = await fetch("/api/generate-stream", { method: "POST", body: fd });
       } else {
-        res = await fetch("/api/generate", {
+        res = await fetch("/api/generate-stream", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: paste }),
+          body: JSON.stringify({
+            text: paste,
+            page_policy: pagePolicy,
+            contact_email: contactEmail,
+            contact_linkedin: contactLinkedin,
+            contact_phone: contactPhone,
+          }),
         });
       }
-      const json = await res.json().catch(() => ({}));
+
       if (!res.ok) {
-        setError(typeof json.detail === "string" ? json.detail : JSON.stringify(json.detail || json) || res.statusText);
+        const json = await res.json().catch(() => ({}));
+        setError(
+          typeof json.detail === "string" ? json.detail : JSON.stringify(json.detail || json) || res.statusText
+        );
         return;
       }
-      setResult(json as GenerateResponse);
+
+      if (!res.body) {
+        setError("Empty response from server");
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalResult: GenerateResponse | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          let ev: { type?: string; message?: string; message_en?: string; data?: GenerateResponse; detail?: string };
+          try {
+            ev = JSON.parse(trimmed) as typeof ev;
+          } catch {
+            continue;
+          }
+          if (ev.type === "progress") {
+            setProgressMessage(ev.message ?? ev.message_en ?? null);
+          } else if (ev.type === "result" && ev.data) {
+            finalResult = ev.data as GenerateResponse;
+          } else if (ev.type === "error") {
+            setError(ev.detail ?? "Generate failed");
+            return;
+          }
+        }
+      }
+
+      const tail = buffer.trim();
+      if (tail) {
+        try {
+          const ev = JSON.parse(tail) as {
+            type?: string;
+            data?: GenerateResponse;
+            detail?: string;
+          };
+          if (ev.type === "result" && ev.data) finalResult = ev.data;
+          if (ev.type === "error") {
+            setError(ev.detail ?? "Generate failed");
+            return;
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+
+      if (!finalResult) {
+        setError("No result from stream");
+        return;
+      }
+      setResult(finalResult);
       setTab("preview");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Request failed");
     } finally {
       setLoading(false);
+      setProgressMessage(null);
     }
-  }, [file, paste]);
+  }, [file, paste, pagePolicy, contactEmail, contactLinkedin, contactPhone]);
 
   const reset = () => {
     if (pdfUrl) URL.revokeObjectURL(pdfUrl);
@@ -180,6 +289,9 @@ export default function Home() {
     setResult(null);
     setFile(null);
     setPaste("");
+    setContactEmail("");
+    setContactLinkedin("");
+    setContactPhone("");
     setError(null);
   };
 
@@ -366,6 +478,75 @@ export default function Home() {
                   rows={10}
                   className="mt-4 w-full resize-y rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
                 />
+                <div className="mt-6 space-y-3 rounded-xl border border-zinc-800 bg-zinc-950/50 px-4 py-4">
+                  <p className="text-xs font-medium text-zinc-400">연락처 (붙여넣기 시 권장)</p>
+                  <p className="text-xs text-zinc-500">
+                    원문에 이메일·LinkedIn이 분명하지 않으면 생성 전에 입력을 요청합니다. 파일 업로드(PDF 등)일 때는
+                    검사를 건너뜁니다.
+                  </p>
+                  <input
+                    type="email"
+                    autoComplete="email"
+                    placeholder="이메일 (예: you@school.edu)"
+                    value={contactEmail}
+                    onChange={(e) => setContactEmail(e.target.value)}
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
+                  />
+                  <input
+                    type="url"
+                    autoComplete="url"
+                    placeholder="LinkedIn (https://linkedin.com/in/…)"
+                    value={contactLinkedin}
+                    onChange={(e) => setContactLinkedin(e.target.value)}
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
+                  />
+                  <input
+                    type="tel"
+                    autoComplete="tel"
+                    placeholder="전화 (선택)"
+                    value={contactPhone}
+                    onChange={(e) => setContactPhone(e.target.value)}
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
+                  />
+                </div>
+                <div className="mt-6 space-y-3 rounded-xl border border-zinc-800 bg-zinc-950/50 px-4 py-4">
+                  <p className="text-xs font-medium text-zinc-400">페이지 정책</p>
+                  <label className="flex cursor-pointer items-start gap-3 text-sm text-zinc-300">
+                    <input
+                      type="radio"
+                      name="pagePolicy"
+                      checked={pagePolicy === "strict_one_page"}
+                      onChange={() => setPagePolicy("strict_one_page")}
+                      className="mt-1 accent-emerald-500"
+                    />
+                    <span>
+                      <strong className="text-zinc-100">1페이지 고정</strong>
+                      <span className="mt-0.5 block text-xs text-zinc-500">
+                        2페이지 이상이면 서버가 1페이지에 맞게 다시 줄입니다. 진행 메시지가 버튼 위에 표시됩니다.
+                      </span>
+                    </span>
+                  </label>
+                  <label className="flex cursor-pointer items-start gap-3 text-sm text-zinc-300">
+                    <input
+                      type="radio"
+                      name="pagePolicy"
+                      checked={pagePolicy === "allow_multi"}
+                      onChange={() => setPagePolicy("allow_multi")}
+                      className="mt-1 accent-emerald-500"
+                    />
+                    <span>
+                      <strong className="text-zinc-100">여러 페이지 허용</strong>
+                      <span className="mt-0.5 block text-xs text-zinc-500">
+                        1페이지 강제 없이 생성만 합니다. 긴 이력서에 적합합니다.
+                      </span>
+                    </span>
+                  </label>
+                </div>
+                {loading && progressMessage && (
+                  <p className="mt-4 rounded-lg border border-emerald-900/40 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-200/95">
+                    {progressMessage}
+                  </p>
+                )}
                 {error && (
                   <p className="mt-4 rounded-lg bg-red-950/50 px-3 py-2 text-sm text-red-300">{error}</p>
                 )}
@@ -375,13 +556,44 @@ export default function Home() {
                   onClick={onSubmit}
                   className="mt-6 w-full rounded-xl bg-emerald-600 py-3 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  {loading ? "Generating… (can take 30–90s)" : "Generate resume"}
+                  {loading
+                    ? progressMessage ?? "생성 중… (30–120초 정도 걸릴 수 있습니다)"
+                    : "Generate resume"}
                 </button>
               </div>
             </div>
           </div>
         ) : (
           <div className="space-y-6">
+            {(result.pdf_page_count != null ||
+              result.one_page_enforced ||
+              result.page_policy_applied === "allow_multi") && (
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                {result.page_policy_applied === "allow_multi" && (
+                  <span className="rounded-full border border-sky-800/50 bg-sky-950/40 px-3 py-1 text-sky-200/90">
+                    여러 페이지 허용 모드
+                  </span>
+                )}
+                {result.pdf_page_count != null && (
+                  <span className="rounded-full border border-zinc-700 bg-zinc-900/80 px-3 py-1 text-zinc-300">
+                    Server PDF:{" "}
+                    <strong className="text-zinc-100">
+                      {result.pdf_page_count} page{result.pdf_page_count === 1 ? "" : "s"}
+                    </strong>
+                  </span>
+                )}
+                {result.one_page_enforced && (
+                  <span className="rounded-full border border-emerald-800/60 bg-emerald-950/40 px-3 py-1 text-emerald-300/95">
+                    Tightened to 1 page (auto revision)
+                  </span>
+                )}
+                {result.pdf_page_count != null && result.pdf_page_count > 1 && (
+                  <span className="rounded-full border border-amber-800/50 bg-amber-950/30 px-3 py-1 text-amber-200/90">
+                    Still multi-page after max revisions — trim manually or shorten source
+                  </span>
+                )}
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-3">
               <button
                 type="button"

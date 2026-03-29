@@ -14,8 +14,21 @@ export type CoachingSection = {
   items: CoachingItem[];
 };
 
+export type PagePolicy = "strict_one_page" | "allow_multi";
+
 export type GenerateResponse = {
   latex_document: string;
   preview_sections: PreviewSection[];
   coaching: CoachingSection[];
+  /** Server compile page count; omitted if check skipped or compile failed */
+  pdf_page_count?: number | null;
+  /** True if multi-page output was revised down to one page */
+  one_page_enforced?: boolean;
+  page_policy_applied?: PagePolicy;
+  revision_log?: string[];
+  revision_log_ko?: string[];
+  /** Heuristic: large bottom whitespace on 1-page PDF; null if not checked */
+  pdf_layout_underfull?: boolean | null;
+  /** LLM rounds used to densify after layout check */
+  density_expand_rounds?: number;
 };

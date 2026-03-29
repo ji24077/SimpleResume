@@ -1,5 +1,6 @@
 """Compile LaTeX to PDF: Docker/latexmk (Overleaf-like) → tectonic → pdflatex."""
 
+import io
 import logging
 import os
 import re
@@ -120,6 +121,8 @@ def _extract_resume_body(latex: str) -> str:
 def normalize_to_dhruv_template(latex: str) -> str:
     """
     Force Dhruv preamble/macros; wrap extracted body in exactly one \\begin{document}...\\end{document}.
+    Set env ``LATEX_PORTABLE_PREAMBLE=1`` to comment out ``fullpage`` / ``glyphtounicode`` in the preamble
+    so host TinyTeX / minimal installs and some web compile paths fail less often (Docker full TeX can leave it off).
     """
     latex = latex.strip()
     if not latex:
@@ -128,6 +131,9 @@ def normalize_to_dhruv_template(latex: str) -> str:
         preamble = _PREAMBLE_PATH.read_text(encoding="utf-8").rstrip()
     except OSError:
         return latex
+    if _env_truthy("LATEX_PORTABLE_PREAMBLE"):
+        preamble = _strip_fullpage_package(preamble)
+        preamble = _strip_problematic_inputs(preamble)
     body = _extract_resume_body(latex)
     if not body:
         body = r"\textit{(No resume body parsed; check model output.)}"
@@ -181,6 +187,10 @@ _UNICODE_REPLACEMENTS: tuple[tuple[str, str], ...] = (
     ("\u3001", ","),  # ideographic comma 、
     ("\u3002", "."),  # ideographic full stop 。
     ("\u3000", " "),  # ideographic space
+    ("\u223c", r"$\sim$"),  # ∼ operator (invalid in many OT1 runs)
+    ("\uff5e", " "),  # fullwidth tilde ～
+    ("\u02dc", " "),  # small tilde ˜
+    ("\u223f", " "),  # sine wave ∿
 )
 
 
@@ -217,6 +227,8 @@ def sanitize_unicode_for_latex(tex: str) -> str:
         tex = tex.replace(old, new)
     tex = _drop_unicode_format_chars(tex)
     tex = _strip_control_chars_except_newline_tab(tex)
+    # Tabs confuse column alignment and sometimes trigger odd breaks; use spaces in body text.
+    tex = tex.replace("\t", " ")
     return tex
 
 
@@ -323,18 +335,61 @@ def _run_latexmk_docker(work_dir: Path, image: str) -> tuple[bool, dict[str, Any
     }
 
 
+def _fix_typo_extbf(tex: str) -> str:
+    r"""Model drops backslash: ``extbf{`` → ``\textbf{`` (e.g. ``\resumeSubheading{..}{}{ extbf{Title}}{}``)."""
+    tex = re.sub(r"\}\s*\{\s*extbf\s*\{", r"}{\\textbf{", tex)
+    tex = re.sub(r"\{\s*extbf\s*\{", r"{\\textbf{", tex)
+    tex = re.sub(r"(?<![\\a-zA-Z])extbf\s*\{", r"\\textbf{", tex)
+    return tex
+
+
+def _fix_unclosed_center_before_first_section(tex: str) -> str:
+    """
+    If ``\\begin{center}`` opens the header but ``\\end{center}`` never closes before the first
+    ``\\section``, pdfLaTeX often fails or renders a broken page. Insert ``\\end{center}`` before
+    the usual ``\\vspace{-7pt}`` that precedes the first section, or before ``\\section`` if absent.
+    """
+    sec = re.search(r"\\section\s*\{", tex)
+    if not sec:
+        return tex
+    doc = re.search(r"\\begin\s*\{\s*document\s*\}", tex, re.IGNORECASE)
+    start_body = doc.end() if doc else 0
+    span = tex[start_body : sec.start()]
+    if r"\begin{center}" not in span:
+        return tex
+    if r"\end{center}" in span:
+        return tex
+    bc = start_body + span.find(r"\begin{center}")
+    inner = tex[bc : sec.start()]
+    vmark = r"\vspace{-7pt}"
+    idx = inner.rfind(vmark)
+    if idx != -1:
+        insert_at = bc + idx
+        return tex[:insert_at] + "\\end{center}\n\n" + tex[insert_at:]
+    return tex[: sec.start()] + "\\end{center}\n\n" + tex[sec.start() :]
+
+
 def sanitize_latex_for_overleaf(tex: str) -> str:
     """
     Fix common model mistakes that break Overleaf / pdflatex:
+    - Missing ``\\end{center}`` before first ``\\section`` (header stuck inside center)
+    - ``extbf`` typo instead of ``\\textbf``
     - \\\\& → \\& (Misplaced alignment tab & inside \\resumeSubheading tabular)
+    - \\\\% → \\% (AI often emits double backslash before % → forced line break + broken layout)
     - \\href{}{Label} → Label (empty URL breaks hyperref / looks wrong)
     """
     if not tex:
         return tex
+    tex = _fix_typo_extbf(tex)
+    tex = _fix_unclosed_center_before_first_section(tex)
     bad = "\\\\&"  # two backslashes + & (LaTeX linebreak + tab char in tabular)
     good = "\\&"
     while bad in tex:
         tex = tex.replace(bad, good)
+    badp = "\\\\%"  # two backslashes + % — almost always meant to be literal \\%
+    goodp = "\\%"
+    while badp in tex:
+        tex = tex.replace(badp, goodp)
     tex = re.sub(r"\\href\{\s*\}\{([^}]*)\}", r"\1", tex)
     return tex
 
@@ -662,6 +717,155 @@ def compile_latex_to_pdf(tex_source: str) -> tuple[bytes | None, dict[str, Any] 
         return None, detail
 
 
+def count_pdf_pages_from_bytes(pdf_bytes: bytes) -> int:
+    """
+    Page count after compile (for 1-page enforcement).
+
+    Order: ``pdfinfo`` (poppler) -> ``qpdf --show-npages`` -> ``pypdf`` (always available).
+    CLI tools are optional on the host running the API; Docker TeX image is unrelated here
+    because counting runs on the API process after PDF bytes are returned.
+    """
+    if not pdf_bytes:
+        raise ValueError("empty PDF bytes")
+
+    def _write_temp_pdf() -> Path:
+        fd, path_str = tempfile.mkstemp(suffix=".pdf")
+        os.close(fd)
+        p = Path(path_str)
+        p.write_bytes(pdf_bytes)
+        return p
+
+    if shutil.which("pdfinfo"):
+        tmp: Path | None = None
+        try:
+            tmp = _write_temp_pdf()
+            out = subprocess.check_output(
+                ["pdfinfo", str(tmp)],
+                text=True,
+                stderr=subprocess.DEVNULL,
+                timeout=30,
+            )
+            m = re.search(r"Pages:\s+(\d+)", out, re.IGNORECASE)
+            if m:
+                return int(m.group(1))
+        except (subprocess.CalledProcessError, FileNotFoundError, TimeoutError, OSError):
+            pass
+        finally:
+            if tmp is not None:
+                tmp.unlink(missing_ok=True)
+
+    if shutil.which("qpdf"):
+        tmp = None
+        try:
+            tmp = _write_temp_pdf()
+            out = subprocess.check_output(
+                ["qpdf", "--show-npages", str(tmp)],
+                text=True,
+                stderr=subprocess.DEVNULL,
+                timeout=30,
+            ).strip()
+            if out.isdigit():
+                return int(out)
+        except (subprocess.CalledProcessError, ValueError, TimeoutError, OSError):
+            pass
+        finally:
+            if tmp is not None:
+                tmp.unlink(missing_ok=True)
+
+    from pypdf import PdfReader
+
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    return len(reader.pages)
+
+
+def pdf_bottom_strip_mean_luminance(
+    pdf_bytes: bytes,
+    *,
+    bottom_fraction: float = 0.22,
+    dpi: int = 100,
+) -> float | None:
+    """
+    Rasterize PDF page 1 (``pdftoppm``) and return mean grayscale (0-255) of the bottom
+    ``bottom_fraction`` of the image. Used to calibrate "full page" vs underfull:
+    measure your Overleaf golden PDF once, then set env or compare with margins.
+
+    Returns ``None`` if ``pdftoppm``/Pillow are missing or rasterize fails.
+    """
+    if not shutil.which("pdftoppm"):
+        return None
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+
+    if not pdf_bytes or bottom_fraction <= 0 or bottom_fraction >= 0.9:
+        return None
+
+    tmpdir = tempfile.mkdtemp(prefix="sr-pdf-lum-")
+    try:
+        pdf_path = Path(tmpdir) / "doc.pdf"
+        pdf_path.write_bytes(pdf_bytes)
+        out_base = str(Path(tmpdir) / "p")
+        subprocess.run(
+            [
+                "pdftoppm",
+                "-png",
+                "-singlefile",
+                f"-r{dpi}",
+                "-f",
+                "1",
+                "-l",
+                "1",
+                str(pdf_path),
+                out_base,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        png_path = Path(tmpdir) / "p.png"
+        if not png_path.is_file():
+            logger.warning("pdftoppm did not produce expected PNG")
+            return None
+        with Image.open(png_path) as im:
+            gray = im.convert("L")
+            w, h = gray.size
+            if h < 20:
+                return None
+            y0 = max(0, int(h * (1.0 - bottom_fraction)))
+            region = gray.crop((0, y0, w, h))
+            pixels = region.getdata()
+            n = region.size[0] * region.size[1]
+            if n == 0:
+                return None
+            total = 0
+            for px in pixels:
+                total += int(px)
+            return total / n
+    except (subprocess.CalledProcessError, OSError, TimeoutError, ValueError) as e:
+        logger.warning("pdf bottom luminance raster failed: %s", e)
+        return None
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def pdf_first_page_bottom_underfull(
+    pdf_bytes: bytes,
+    *,
+    bottom_fraction: float = 0.22,
+    mean_threshold: float = 237.0,
+    dpi: int = 100,
+) -> bool | None:
+    """True if bottom strip mean luminance >= ``mean_threshold`` (too much white)."""
+    mean = pdf_bottom_strip_mean_luminance(
+        pdf_bytes, bottom_fraction=bottom_fraction, dpi=dpi
+    )
+    if mean is None:
+        return None
+    return mean >= mean_threshold
+
+
 def compiler_available() -> dict[str, Any]:
     docker_image = os.environ.get("LATEX_DOCKER_IMAGE", "").strip()
     has_docker = bool(shutil.which("docker"))
@@ -690,6 +894,18 @@ def compiler_available() -> dict[str, Any]:
     elif docker_image and not has_docker and allow_fallback:
         hint = "Docker not in PATH; will use host TeX (LATEX_DOCKER_ALLOW_FALLBACK=1)."
 
+    pdfinfo = bool(shutil.which("pdfinfo"))
+    qpdf = bool(shutil.which("qpdf"))
+    pdf_page_counter = "pdfinfo" if pdfinfo else ("qpdf" if qpdf else "pypdf")
+    pdftoppm = bool(shutil.which("pdftoppm"))
+    try:
+        import PIL  # noqa: F401
+
+        pillow_installed = True
+    except ImportError:
+        pillow_installed = False
+    pdf_density_check_ready = bool(pdftoppm and pillow_installed)
+
     return {
         "pdflatex": pdflatex,
         "tectonic": tectonic,
@@ -702,4 +918,11 @@ def compiler_available() -> dict[str, Any]:
         "latex_docker_network": docker_network,
         "pdf_compile": pdf_compile,
         "compile_hint": hint,
+        "pdfinfo": pdfinfo,
+        "qpdf": qpdf,
+        "pdf_page_counter": pdf_page_counter,
+        "pdftoppm": pdftoppm,
+        "pillow": pillow_installed,
+        "pdf_density_check_ready": pdf_density_check_ready,
+        "latex_portable_preamble": _env_truthy("LATEX_PORTABLE_PREAMBLE"),
     }
