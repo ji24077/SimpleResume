@@ -3,7 +3,6 @@ import json
 import logging
 import os
 import re
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -39,12 +38,6 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o"
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
-    # LaTeX / Docker (api/.env — see .env.example)
-    latex_docker_image: str = ""
-    latex_docker_only: bool = False  # if True: never host latexmk/tectonic/pdflatex
-    latex_docker_allow_fallback: bool = False  # if False + image set: no silent TinyTeX fallback
-    latex_docker_network: str = "none"
-
     # env는 위에서 load_dotenv로만 주입 (cwd/이중 로드 이슈 방지)
     model_config = SettingsConfigDict(extra="ignore")
 
@@ -57,17 +50,6 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-
-# compile_pdf.py는 os.environ만 읽음 — pydantic으로 파싱한 값을 명시 동기화
-if settings.latex_docker_image.strip():
-    os.environ["LATEX_DOCKER_IMAGE"] = settings.latex_docker_image.strip()
-if settings.latex_docker_network.strip():
-    os.environ["LATEX_DOCKER_NETWORK"] = settings.latex_docker_network.strip()
-if settings.latex_docker_only:
-    os.environ["LATEX_DOCKER_ONLY"] = "1"
-if settings.latex_docker_allow_fallback:
-    os.environ["LATEX_DOCKER_ALLOW_FALLBACK"] = "1"
-
 if not settings.openai_api_key:
     logger.warning(
         "OPENAI_API_KEY is empty. Add it to %s or %s then restart the API.",
@@ -76,22 +58,6 @@ if not settings.openai_api_key:
     )
 else:
     logger.info("OpenAI API key loaded (%d chars). Model: %s", len(settings.openai_api_key), settings.openai_model)
-
-_has_docker_cli = bool(shutil.which("docker"))
-logger.info(
-    "PDF compile env: LATEX_DOCKER_IMAGE=%r | docker CLI=%s | LATEX_DOCKER_ONLY=%s | "
-    "LATEX_DOCKER_ALLOW_FALLBACK=%s | LATEX_DOCKER_NETWORK=%r",
-    settings.latex_docker_image or None,
-    "yes" if _has_docker_cli else "NO (host TeX would be used only if allowed)",
-    settings.latex_docker_only,
-    settings.latex_docker_allow_fallback,
-    settings.latex_docker_network,
-)
-if settings.latex_docker_image.strip() and not _has_docker_cli and not settings.latex_docker_allow_fallback:
-    logger.warning(
-        "LATEX_DOCKER_IMAGE is set but `docker` is not in PATH — compiles will fail until Docker is available "
-        "or you set LATEX_DOCKER_ALLOW_FALLBACK=1 (TinyTeX/MacTeX)."
-    )
 app = FastAPI(title="SimpleResume API", version="0.1.0")
 
 app.add_middleware(
@@ -162,7 +128,7 @@ def health():
         "openai_configured": bool(settings.openai_api_key),
         "model": settings.openai_model if settings.openai_api_key else None,
         "env_hint": str(_API_DIR / ".env"),
-        "pdf_compile": comp.get("pdf_compile", comp.get("pdflatex") or comp.get("tectonic")),
+        "pdf_compile": comp["pdflatex"] or comp["tectonic"],
         "compiler": comp,
     }
 
@@ -303,37 +269,12 @@ class CompilePdfBody(BaseModel):
     latex_document: str
 
 
-class CompileTexBody(BaseModel):
-    """Full `.tex` source, compiled as-is (no Dhruv template normalization) — closest to Overleaf."""
-
-    tex: str
-
-
 @app.post("/compile-pdf")
 def compile_pdf_endpoint(body: CompilePdfBody):
-    """LaTeX → PDF; normalizes to the repo Dhruv preamble/body split (app default)."""
+    """Real LaTeX → PDF (Overleaf-style preview). Requires pdflatex or tectonic on server."""
     tex = sanitize_latex_for_overleaf(
         sanitize_unicode_for_latex(normalize_to_dhruv_template(body.latex_document.strip()))
     )
-    pdf, err_detail = compile_latex_to_pdf(tex)
-    if pdf:
-        return Response(content=pdf, media_type="application/pdf")
-    raise HTTPException(status_code=422, detail=err_detail or {"code": "COMPILE_FAILED", "message": "Compile failed"})
-
-
-@app.post("/compile")
-def compile_raw_tex_endpoint(body: CompileTexBody):
-    """
-    LaTeX → PDF without Dhruv normalization (Overleaf-style main.tex compile).
-    Unicode / line-break+ampersand / empty href fixes still applied. Prefer Docker TeX Live for parity.
-    """
-    raw = body.tex.strip()
-    if not raw or "\\documentclass" not in raw:
-        raise HTTPException(
-            status_code=400,
-            detail="tex must be a full document including \\documentclass{...}.",
-        )
-    tex = sanitize_latex_for_overleaf(sanitize_unicode_for_latex(raw))
     pdf, err_detail = compile_latex_to_pdf(tex)
     if pdf:
         return Response(content=pdf, media_type="application/pdf")
