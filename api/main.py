@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +12,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from compile_pdf import (
@@ -38,6 +39,13 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o"
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
+    # Overleaf-grade default: TeX Live full in Docker + latexmk only (no silent TinyTeX).
+    # Opt out in api/.env: LATEX_DOCKER_IMAGE=  LATEX_DOCKER_ONLY=0  LATEX_DOCKER_ALLOW_FALLBACK=1
+    latex_docker_image: str = Field(default="simpleresume-texlive:full")
+    latex_docker_only: bool = Field(default=True)
+    latex_docker_allow_fallback: bool = Field(default=False)
+    latex_docker_network: str = "none"
+
     # env는 위에서 load_dotenv로만 주입 (cwd/이중 로드 이슈 방지)
     model_config = SettingsConfigDict(extra="ignore")
 
@@ -48,8 +56,41 @@ class Settings(BaseSettings):
             return v.strip()
         return v
 
+    @field_validator("latex_docker_image", mode="before")
+    @classmethod
+    def strip_docker_image(cls, v: Any) -> Any:
+        if v is None:
+            return ""
+        if isinstance(v, str):
+            return v.strip()
+        return v
+
+    @model_validator(mode="after")
+    def empty_image_disables_docker_only(self):
+        """빈 이미지면 Docker-only를 끄지 않으면 PDF가 영원히 불가능해짐."""
+        if not self.latex_docker_image.strip():
+            return self.model_copy(update={"latex_docker_only": False})
+        return self
+
 
 settings = Settings()
+
+# compile_pdf.py 는 os.environ 만 읽음 — Settings 와 동기화
+if settings.latex_docker_image.strip():
+    os.environ["LATEX_DOCKER_IMAGE"] = settings.latex_docker_image.strip()
+else:
+    os.environ.pop("LATEX_DOCKER_IMAGE", None)
+if settings.latex_docker_network.strip():
+    os.environ["LATEX_DOCKER_NETWORK"] = settings.latex_docker_network.strip()
+if settings.latex_docker_only:
+    os.environ["LATEX_DOCKER_ONLY"] = "1"
+else:
+    os.environ.pop("LATEX_DOCKER_ONLY", None)
+if settings.latex_docker_allow_fallback:
+    os.environ["LATEX_DOCKER_ALLOW_FALLBACK"] = "1"
+else:
+    os.environ.pop("LATEX_DOCKER_ALLOW_FALLBACK", None)
+
 if not settings.openai_api_key:
     logger.warning(
         "OPENAI_API_KEY is empty. Add it to %s or %s then restart the API.",
@@ -58,6 +99,32 @@ if not settings.openai_api_key:
     )
 else:
     logger.info("OpenAI API key loaded (%d chars). Model: %s", len(settings.openai_api_key), settings.openai_model)
+
+_has_docker_cli = bool(shutil.which("docker"))
+logger.info(
+    "PDF compile env: LATEX_DOCKER_IMAGE=%r | docker CLI=%s | LATEX_DOCKER_ONLY=%s | "
+    "LATEX_DOCKER_ALLOW_FALLBACK=%s | LATEX_DOCKER_NETWORK=%r",
+    settings.latex_docker_image or None,
+    "yes" if _has_docker_cli else "NO (host TeX would be used only if allowed)",
+    settings.latex_docker_only,
+    settings.latex_docker_allow_fallback,
+    settings.latex_docker_network,
+)
+if settings.latex_docker_image.strip() and not _has_docker_cli and not settings.latex_docker_allow_fallback:
+    logger.warning(
+        "LATEX_DOCKER_IMAGE is set but `docker` is not in PATH — compiles will fail until Docker is available "
+        "or you set LATEX_DOCKER_ALLOW_FALLBACK=1 (TinyTeX/MacTeX)."
+    )
+
+_comp = compiler_available()
+if settings.latex_docker_only and settings.latex_docker_image.strip() and not _comp.get("latex_docker_ready"):
+    logger.warning(
+        "Overleaf-grade PDF: LATEX_DOCKER_ONLY=1 but Docker is not ready for %s. "
+        "From repo root run: docker compose build texlive — then ensure Docker Desktop is running. "
+        "Or set LATEX_DOCKER_ONLY=0 and LATEX_DOCKER_ALLOW_FALLBACK=1 for host TeX.",
+        settings.latex_docker_image,
+    )
+
 app = FastAPI(title="SimpleResume API", version="0.1.0")
 
 app.add_middleware(
@@ -128,7 +195,7 @@ def health():
         "openai_configured": bool(settings.openai_api_key),
         "model": settings.openai_model if settings.openai_api_key else None,
         "env_hint": str(_API_DIR / ".env"),
-        "pdf_compile": comp["pdflatex"] or comp["tectonic"],
+        "pdf_compile": comp.get("pdf_compile", comp.get("pdflatex") or comp.get("tectonic")),
         "compiler": comp,
     }
 
@@ -271,10 +338,35 @@ class CompilePdfBody(BaseModel):
 
 @app.post("/compile-pdf")
 def compile_pdf_endpoint(body: CompilePdfBody):
-    """Real LaTeX → PDF (Overleaf-style preview). Requires pdflatex or tectonic on server."""
+    """LaTeX → PDF; normalizes to the repo Dhruv preamble/body split (app default)."""
     tex = sanitize_latex_for_overleaf(
         sanitize_unicode_for_latex(normalize_to_dhruv_template(body.latex_document.strip()))
     )
+    pdf, err_detail = compile_latex_to_pdf(tex)
+    if pdf:
+        return Response(content=pdf, media_type="application/pdf")
+    raise HTTPException(status_code=422, detail=err_detail or {"code": "COMPILE_FAILED", "message": "Compile failed"})
+
+
+class CompileTexBody(BaseModel):
+    """Full `.tex` source, compiled as-is (no Dhruv normalization)."""
+
+    tex: str
+
+
+@app.post("/compile")
+def compile_raw_tex_endpoint(body: CompileTexBody):
+    """
+    LaTeX → PDF without Dhruv normalization (Overleaf-style main.tex compile).
+    Prefer Docker TeX Live (`LATEX_DOCKER_IMAGE`) for reproducible builds.
+    """
+    raw = body.tex.strip()
+    if not raw or "\\documentclass" not in raw:
+        raise HTTPException(
+            status_code=400,
+            detail="tex must be a full document including \\documentclass{...}.",
+        )
+    tex = sanitize_latex_for_overleaf(sanitize_unicode_for_latex(raw))
     pdf, err_detail = compile_latex_to_pdf(tex)
     if pdf:
         return Response(content=pdf, media_type="application/pdf")

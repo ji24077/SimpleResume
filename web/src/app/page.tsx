@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { GenerateResponse } from "@/lib/types";
 
@@ -188,7 +189,15 @@ export default function Home() {
         <div className="mx-auto max-w-4xl px-4 py-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h1 className="text-lg font-semibold tracking-tight text-white">SimpleResume</h1>
+              <div className="flex flex-wrap items-center gap-3">
+                <h1 className="text-lg font-semibold tracking-tight text-white">SimpleResume</h1>
+                <Link
+                  href="/latex"
+                  className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:border-emerald-700 hover:text-emerald-300"
+                >
+                  LaTeX만 컴파일
+                </Link>
+              </div>
               <p className="text-xs text-zinc-500">Big Tech–ready resumes · LaTeX · coaching</p>
             </div>
             {health && (

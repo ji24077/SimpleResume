@@ -16,9 +16,9 @@ CRITICAL — LaTeX shape (must match this project’s canonical template):
 1) The string "latex_document" MUST be a single complete .tex file.
 
 2) The preamble (from \\documentclass through the line "%%%%%%  RESUME STARTS HERE  %%%%%%%%%%%%%%%%%%%%%%%%%%%%")
-   MUST match the CANONICAL PREAMBLE below CHARACTER-FOR-CHARACTER:
-   same packages, same order, the glyphtounicode line MUST stay COMMENTED (% \\input{glyphtounicode}...) so Overleaf compiles without extra files,
-   same margins, same \\titleformat{\\section}{...},
+   MUST match the CANONICAL PREAMBLE below CHARACTER-FOR-CHARACTER (from api/dhruv_preamble.tex):
+   same packages and order (including \\usepackage[empty]{fullpage} and \\input{glyphtounicode}),
+   same margin \\addtolength{...} block, same \\titleformat{\\section}{...},
    same \\pdfgentounicode=1, same \\newcommand definitions for \\resumeItem, \\resumeSubheading,
    \\resumeProjectHeading, \\resumeSubHeadingListStart/End, \\resumeItemListStart/End.
    Do NOT rename macros, do NOT add/remove packages, do NOT use a different document class.

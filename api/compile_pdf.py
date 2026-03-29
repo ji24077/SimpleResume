@@ -1,6 +1,7 @@
-"""Compile LaTeX to PDF using pdflatex (or tectonic)."""
+"""Compile LaTeX to PDF: Docker/latexmk (Overleaf-like) → tectonic → pdflatex."""
 
 import logging
+import os
 import re
 import unicodedata
 import shutil
@@ -12,12 +13,46 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _PREAMBLE_PATH = Path(__file__).resolve().parent / "dhruv_preamble.tex"
+_TEX_ASSETS_DIR = Path(__file__).resolve().parent / "tex_assets"
+_ASSET_SUFFIXES = frozenset(
+    {".tex", ".sty", ".cls", ".bib", ".bst", ".png", ".jpg", ".jpeg", ".pdf", ".eps"}
+)
 
 _INSTALL_HINT = (
-    "Install TeX packages: macOS → `brew install --cask basictex` then "
-    "`sudo tlmgr install collection-latexextra` (or MacTeX). "
-    "Or use `brew install tectonic` and ensure it can fetch packages."
+    "Overleaf parity: `docker compose build texlive`, set in api/.env: "
+    "LATEX_DOCKER_IMAGE=simpleresume-texlive:full (do not rely on export-only — restart API after .env). "
+    "With an image set, host TinyTeX is NOT used unless LATEX_DOCKER_ALLOW_FALLBACK=1. "
+    "Optional: LATEX_DOCKER_ONLY=1. No Docker: full MacTeX/TeX Live + latexmk."
 )
+
+
+def _env_truthy(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _latexmk_argv(tex_basename: str) -> list[str]:
+    """
+    Overleaf-style multi-pass build; -no-shell-escape reduces arbitrary shell execution risk.
+    %O %S are latexmk placeholders for options and the source file.
+    """
+    pdflatex_cmd = (
+        "pdflatex -interaction=nonstopmode -halt-on-error -file-line-error -no-shell-escape %O %S"
+    )
+    return [
+        "latexmk",
+        "-pdf",
+        "-interaction=nonstopmode",
+        "-halt-on-error",
+        "-file-line-error",
+        f"-pdflatex={pdflatex_cmd}",
+        tex_basename,
+    ]
+
+
+def _docker_run_prefix() -> list[str]:
+    """Extra isolation: default --network=none (override with LATEX_DOCKER_NETWORK=bridge)."""
+    net = os.environ.get("LATEX_DOCKER_NETWORK", "none").strip() or "none"
+    return ["docker", "run", "--rm", "--network", net]
 
 
 def _latex_log_error_excerpt(log: str) -> str:
@@ -185,6 +220,109 @@ def sanitize_unicode_for_latex(tex: str) -> str:
     return tex
 
 
+def _copy_optional_tex_assets(work_dir: Path) -> None:
+    """Mirror Overleaf: extra .tex/.sty/.cls/images in the compile directory."""
+    if not _TEX_ASSETS_DIR.is_dir():
+        return
+    for src in _TEX_ASSETS_DIR.iterdir():
+        if not src.is_file() or src.name.startswith("."):
+            continue
+        if src.suffix.lower() not in _ASSET_SUFFIXES:
+            continue
+        try:
+            shutil.copy2(src, work_dir / src.name)
+        except OSError as e:
+            logger.warning("Could not copy tex asset %s: %s", src.name, e)
+
+
+def _unlink_resume_pdf(work_dir: Path) -> None:
+    p = work_dir / "resume.pdf"
+    if p.is_file():
+        try:
+            p.unlink()
+        except OSError:
+            pass
+
+
+def _run_latexmk(tex_file: Path, work_dir: Path) -> tuple[bool, dict[str, Any]]:
+    """latexmk -pdf (multi-pass), Overleaf-style."""
+    latexmk = shutil.which("latexmk")
+    if not latexmk:
+        return False, {
+            "engine": "latexmk",
+            "exit_code": None,
+            "log_excerpt": "latexmk not found in PATH",
+        }
+    proc = subprocess.run(
+        _latexmk_argv(tex_file.name),
+        cwd=str(work_dir),
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    pdf = work_dir / "resume.pdf"
+    if pdf.is_file() and pdf.stat().st_size > 0:
+        return True, {}
+    log_raw = ""
+    log_path = work_dir / "resume.log"
+    if log_path.is_file():
+        log_raw = log_path.read_text(encoding="utf-8", errors="replace")
+    excerpt = _latex_log_error_excerpt(log_raw)
+    combined = ((proc.stderr or "") + "\n" + (proc.stdout or "")).strip()
+    if not excerpt and combined:
+        excerpt = combined[-8000:]
+    elif excerpt and proc.returncode != 0 and len(excerpt) < 200 and combined:
+        excerpt = excerpt + "\n---\n" + combined[-4000:]
+    return False, {
+        "engine": "latexmk",
+        "exit_code": proc.returncode,
+        "log_excerpt": excerpt or combined or "(no log)",
+        "log_bytes": len(log_raw),
+    }
+
+
+def _run_latexmk_docker(work_dir: Path, image: str) -> tuple[bool, dict[str, Any]]:
+    """TeX Live full (or similar) in Docker — fixed environment, no host TinyTeX drift."""
+    if not shutil.which("docker"):
+        return False, {
+            "engine": "latexmk-docker",
+            "exit_code": None,
+            "log_excerpt": "docker CLI not found in PATH",
+        }
+    host_mount = str(work_dir.resolve())
+    proc = subprocess.run(
+        _docker_run_prefix()
+        + [
+            "-v",
+            f"{host_mount}:/work",
+            "-w",
+            "/work",
+            image,
+            *_latexmk_argv("resume.tex"),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    pdf = work_dir / "resume.pdf"
+    if pdf.is_file() and pdf.stat().st_size > 0:
+        return True, {}
+    log_raw = ""
+    log_path = work_dir / "resume.log"
+    if log_path.is_file():
+        log_raw = log_path.read_text(encoding="utf-8", errors="replace")
+    excerpt = _latex_log_error_excerpt(log_raw)
+    combined = ((proc.stderr or "") + "\n" + (proc.stdout or "")).strip()
+    if not excerpt and combined:
+        excerpt = combined[-8000:]
+    return False, {
+        "engine": "latexmk-docker",
+        "exit_code": proc.returncode,
+        "log_excerpt": excerpt or combined or "(no log)",
+        "log_bytes": len(log_raw),
+    }
+
+
 def sanitize_latex_for_overleaf(tex: str) -> str:
     """
     Fix common model mistakes that break Overleaf / pdflatex:
@@ -217,6 +355,7 @@ def _run_pdflatex(tex_file: Path, out_dir: Path) -> tuple[bool, dict[str, Any]]:
                 "-interaction=nonstopmode",
                 "-halt-on-error",
                 "-file-line-error",
+                "-no-shell-escape",
                 f"-output-directory={out_dir}",
                 tex_file.name,
             ],
@@ -280,12 +419,193 @@ def _strip_problematic_inputs(tex: str) -> str:
     )
 
 
+def _strip_fullpage_package(tex: str) -> str:
+    """
+    TinyTeX/BasicTeX often omit fullpage.sty; Overleaf/TeX Live full have it.
+    Margins in our preamble still use \\addtolength, so layout stays close without fullpage.
+    """
+    return re.sub(
+        r"(?im)^[ \t]*\\usepackage(?:\s*\[[^]]*\])?\s*\{\s*fullpage\s*\}\s*$",
+        "% fullpage package omitted (TinyTeX/BasicTeX often lack fullpage.sty); margin lines below still apply",
+        tex,
+    )
+
+
+_FA_STUB_AFTER_DOCCLASS = """
+% SR: fontawesome5 unavailable — empty placeholders (install tlmgr package or Docker TeX Live for icons)
+\\providecommand{\\faLinkedin}{}
+\\providecommand{\\faGithub}{}
+\\providecommand{\\faEnvelope}{}
+\\providecommand{\\faPhone}{}
+\\providecommand{\\faGlobe}{}
+\\providecommand{\\faMapMarker}{}
+\\providecommand{\\faIcon}[2][]{}
+"""
+
+
+def _strip_fontawesome5_package(tex: str) -> str:
+    """TinyTeX often lacks fontawesome5; Docker / full TeX Live include it."""
+    stripped = re.sub(
+        r"(?im)^[ \t]*\\usepackage(?:\s*\[[^]]*\])?\s*\{\s*fontawesome5\s*\}\s*$",
+        "% fontawesome5 omitted — install: tlmgr install fontawesome5, or use Docker TeX Live",
+        tex,
+    )
+    if stripped == tex:
+        return tex
+    m = re.search(r"(?m)^\\documentclass[^\n]*\n", stripped)
+    if m:
+        return stripped[: m.end()] + _FA_STUB_AFTER_DOCCLASS + stripped[m.end() :]
+    return _FA_STUB_AFTER_DOCCLASS + stripped
+
+
+def _should_use_portable_variant_order() -> bool:
+    """
+    Without a Docker image we only have host TeX (often TinyTeX): try fullpage-free variants first.
+    If LATEX_DOCKER_IMAGE is set but docker CLI is missing and fallback is on, same idea.
+    """
+    img = os.environ.get("LATEX_DOCKER_IMAGE", "").strip()
+    has_docker = bool(shutil.which("docker"))
+    if not img:
+        return True
+    if _env_truthy("LATEX_DOCKER_ALLOW_FALLBACK") and not has_docker:
+        return True
+    return False
+
+
+def _compile_variants(tex_source: str, *, portable_first: bool) -> list[tuple[str, str]]:
+    """
+    Deduped retries. portable_first: TinyTeX-safe order (drop fullpage / glyph / fontawesome first).
+    Otherwise: canonical first (best for Docker TeX Live full).
+    """
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    def push(label: str, t: str) -> None:
+        if t in seen:
+            return
+        seen.add(t)
+        out.append((label, t))
+
+    no_fp = _strip_fullpage_package(tex_source)
+    no_glyph = _strip_problematic_inputs(tex_source)
+    both = _strip_problematic_inputs(no_fp)
+    no_fp_fa = _strip_fontawesome5_package(no_fp)
+    fullpage_glyph_fa = _strip_problematic_inputs(no_fp_fa)
+
+    if portable_first:
+        push("fullpage_glyph_fa_skipped", fullpage_glyph_fa)
+        push("fullpage_and_glyphtounicode_skipped", both)
+        push("fullpage_fontawesome_skipped", no_fp_fa)
+        push("fullpage_skipped", no_fp)
+        push("glyphtounicode_skipped", no_glyph)
+        push("canonical", tex_source)
+    else:
+        push("canonical", tex_source)
+        push("fullpage_skipped", no_fp)
+        push("glyphtounicode_skipped", no_glyph)
+        push("fullpage_and_glyphtounicode_skipped", both)
+        push("fullpage_fontawesome_skipped", no_fp_fa)
+        push("fullpage_glyph_fa_skipped", fullpage_glyph_fa)
+    return out
+
+
+def _try_compile_variant(work_dir: Path, variant_label: str) -> tuple[bool, list[dict[str, Any]]]:
+    """
+    Engine order: Docker latexmk (if configured) → host latexmk → tectonic → pdflatex×2.
+
+    If LATEX_DOCKER_IMAGE is set, host TeX is skipped unless LATEX_DOCKER_ALLOW_FALLBACK=1
+    (avoids silent TinyTeX when Docker was intended).
+
+    LATEX_DOCKER_ONLY=1: Docker latexmk only.
+    """
+    tex_path = work_dir / "resume.tex"
+    pdf_path = work_dir / "resume.pdf"
+    attempts: list[dict[str, Any]] = []
+
+    docker_only = _env_truthy("LATEX_DOCKER_ONLY")
+    allow_fallback = _env_truthy("LATEX_DOCKER_ALLOW_FALLBACK")
+    docker_image = os.environ.get("LATEX_DOCKER_IMAGE", "").strip()
+    has_docker = bool(shutil.which("docker"))
+
+    if docker_only:
+        if not docker_image or not has_docker:
+            return False, [
+                {
+                    "engine": "latexmk-docker",
+                    "exit_code": None,
+                    "log_excerpt": "LATEX_DOCKER_ONLY=1 requires LATEX_DOCKER_IMAGE and docker in PATH.",
+                    "variant": variant_label,
+                }
+            ]
+        _unlink_resume_pdf(work_dir)
+        ok, info = _run_latexmk_docker(work_dir, docker_image)
+        if info:
+            attempts.append({**info, "variant": variant_label})
+        if ok and pdf_path.is_file() and pdf_path.stat().st_size > 0:
+            return True, attempts
+        return False, attempts
+
+    if docker_image:
+        if not has_docker:
+            msg = (
+                "LATEX_DOCKER_IMAGE is set but `docker` is not in PATH. "
+                "Start Docker Desktop, or remove LATEX_DOCKER_IMAGE, or set LATEX_DOCKER_ALLOW_FALLBACK=1 to use host TeX."
+            )
+            if not allow_fallback:
+                return False, [
+                    {
+                        "engine": "latexmk-docker",
+                        "exit_code": None,
+                        "log_excerpt": msg,
+                        "variant": variant_label,
+                    }
+                ]
+        else:
+            _unlink_resume_pdf(work_dir)
+            ok, info = _run_latexmk_docker(work_dir, docker_image)
+            if info:
+                attempts.append({**info, "variant": variant_label})
+            if ok and pdf_path.is_file() and pdf_path.stat().st_size > 0:
+                return True, attempts
+            if not allow_fallback:
+                return False, attempts
+
+    if shutil.which("latexmk"):
+        _unlink_resume_pdf(work_dir)
+        ok, info = _run_latexmk(tex_path, work_dir)
+        if info:
+            attempts.append({**info, "variant": variant_label})
+        if ok and pdf_path.is_file() and pdf_path.stat().st_size > 0:
+            return True, attempts
+
+    _unlink_resume_pdf(work_dir)
+    ok, info = _run_tectonic(tex_path, work_dir)
+    if not ok and info:
+        attempts.append({**info, "variant": variant_label})
+    if not ok:
+        _unlink_resume_pdf(work_dir)
+        ok2, info2 = _run_pdflatex(tex_path, work_dir)
+        if not ok2 and info2:
+            attempts.append({**info2, "variant": variant_label})
+        ok = ok2
+    else:
+        ok = True
+
+    if ok and pdf_path.is_file() and pdf_path.stat().st_size > 0:
+        return True, attempts
+    return False, attempts
+
+
 def compile_latex_to_pdf(tex_source: str) -> tuple[bytes | None, dict[str, Any] | None]:
     """
     Returns (pdf_bytes, None) on success, or (None, error_detail) on failure.
     error_detail is JSON-serializable for HTTP 422 responses.
+
+    Uses a temp project dir (Overleaf-style): optional files from api/tex_assets/ plus resume.tex.
+    Prefer LATEX_DOCKER_IMAGE + latexmk in TeX Live full, then host latexmk, then tectonic/pdflatex.
+    Retries with fullpage and/or glyphtounicode stripped for TinyTeX / tectonic quirks.
     """
-    tex_source = _strip_problematic_inputs(tex_source.strip())
+    tex_source = tex_source.strip()
     tex_source = sanitize_unicode_for_latex(tex_source)
     tex_source = sanitize_latex_for_overleaf(tex_source)
     if not tex_source or "\\documentclass" not in tex_source:
@@ -296,27 +616,26 @@ def compile_latex_to_pdf(tex_source: str) -> tuple[bytes | None, dict[str, Any] 
             "hint": _INSTALL_HINT,
         }
 
+    variants = _compile_variants(
+        tex_source, portable_first=_should_use_portable_variant_order()
+    )
+
     with tempfile.TemporaryDirectory(prefix="sr_tex_") as tmp:
         out = Path(tmp)
+        _copy_optional_tex_assets(out)
         tex_path = out / "resume.tex"
-        tex_path.write_text(tex_source, encoding="utf-8")
-
-        attempts: list[dict[str, Any]] = []
-        # tectonic first: better Unicode + package fetch; pdflatex fallback
-        ok, info = _run_tectonic(tex_path, out)
-        if not ok and info:
-            attempts.append(info)
-        if not ok:
-            ok2, info2 = _run_pdflatex(tex_path, out)
-            if not ok2 and info2:
-                attempts.append(info2)
-            ok = ok2
-
         pdf_path = out / "resume.pdf"
-        if ok and pdf_path.is_file():
-            data = pdf_path.read_bytes()
-            logger.info("Compiled PDF: %d bytes", len(data))
-            return data, None
+        attempts: list[dict[str, Any]] = []
+
+        for variant_label, tex in variants:
+            tex_path.write_text(tex, encoding="utf-8")
+            ok, variant_attempts = _try_compile_variant(out, variant_label)
+            attempts.extend(variant_attempts)
+
+            if ok and pdf_path.is_file() and pdf_path.stat().st_size > 0:
+                data = pdf_path.read_bytes()
+                logger.info("Compiled PDF: %d bytes (%s)", len(data), variant_label)
+                return data, None
 
         parts: list[str] = []
         for a in attempts:
@@ -343,8 +662,44 @@ def compile_latex_to_pdf(tex_source: str) -> tuple[bytes | None, dict[str, Any] 
         return None, detail
 
 
-def compiler_available() -> dict[str, bool]:
+def compiler_available() -> dict[str, Any]:
+    docker_image = os.environ.get("LATEX_DOCKER_IMAGE", "").strip()
+    has_docker = bool(shutil.which("docker"))
+    latexmk = bool(shutil.which("latexmk"))
+    pdflatex = bool(shutil.which("pdflatex"))
+    tectonic = bool(shutil.which("tectonic"))
+    docker_ready = bool(docker_image and has_docker)
+    docker_only = _env_truthy("LATEX_DOCKER_ONLY")
+    allow_fallback = _env_truthy("LATEX_DOCKER_ALLOW_FALLBACK")
+    docker_network = os.environ.get("LATEX_DOCKER_NETWORK", "none").strip() or "none"
+
+    if docker_only:
+        pdf_compile = docker_ready
+    elif docker_image and not allow_fallback:
+        pdf_compile = docker_ready
+    else:
+        pdf_compile = docker_ready or latexmk or pdflatex or tectonic
+
+    hint: str | None = None
+    if docker_only and not docker_ready:
+        hint = "LATEX_DOCKER_ONLY=1: set LATEX_DOCKER_IMAGE and ensure docker is in PATH."
+    elif docker_image and not has_docker and not allow_fallback:
+        hint = "LATEX_DOCKER_IMAGE is set but docker CLI missing — start Docker or set LATEX_DOCKER_ALLOW_FALLBACK=1."
+    elif not pdf_compile:
+        hint = "No compiler: set LATEX_DOCKER_IMAGE + Docker, or install latexmk/TeX Live / pdflatex."
+    elif docker_image and not has_docker and allow_fallback:
+        hint = "Docker not in PATH; will use host TeX (LATEX_DOCKER_ALLOW_FALLBACK=1)."
+
     return {
-        "pdflatex": bool(shutil.which("pdflatex")),
-        "tectonic": bool(shutil.which("tectonic")),
+        "pdflatex": pdflatex,
+        "tectonic": tectonic,
+        "latexmk": latexmk,
+        "docker": has_docker,
+        "latex_docker_image": docker_image or None,
+        "latex_docker_ready": docker_ready,
+        "latex_docker_only": docker_only,
+        "latex_docker_allow_fallback": allow_fallback,
+        "latex_docker_network": docker_network,
+        "pdf_compile": pdf_compile,
+        "compile_hint": hint,
     }

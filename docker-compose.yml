@@ -1,0 +1,11 @@
+# Optional: fixed TeX Live for API compile (Docker + latexmk).
+#
+#   docker compose build texlive
+#   # api/.env: LATEX_DOCKER_IMAGE=simpleresume-texlive:full
+
+services:
+  texlive:
+    build:
+      context: .
+      dockerfile: docker/texlive-full/Dockerfile
+    image: simpleresume-texlive:full
