@@ -72,6 +72,11 @@ Open [http://localhost:3000](http://localhost:3000). LaTeX-only compile: [http:/
 
 Check `GET http://127.0.0.1:8000/health` → `pdf_compile`, `compiler.latex_docker_ready`.
 
+## Docs (구현·엣지케이스)
+
+- **[docs/ENGINEERING_NOTES.md](docs/ENGINEERING_NOTES.md)** — 지금까지 구현된 동작, 엣지케이스, 건드리면 안 되는 연관(프롬프트·sanitize·스트림 등).  
+- **[api/OPS_CHECKLIST.md](api/OPS_CHECKLIST.md)** — 운영 시 Poppler/Pillow·밀도 루프 확인용 체크리스트.
+
 ## Env
 
 | Variable | Where | Purpose |
