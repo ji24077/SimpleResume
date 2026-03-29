@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SimpleResume — LaTeX + coaching",
+  title: "SimpleResume — ATS-friendly LaTeX resumes & coaching",
   description:
-    "Upload your resume. Get Dhruv-style SWE LaTeX, preview, per-section coaching, and download.",
+    "Trained on 100+ résumé reviews: ATS-friendly, impactful, intuitive formatting. LaTeX export, PDF preview, and line-by-line coaching.",
 };
 
 export default function RootLayout({

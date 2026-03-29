@@ -37,11 +37,11 @@ export default function LatexCompilePage() {
   const compile = useCallback(async () => {
     const t = tex.trim();
     if (!t) {
-      setError("LaTeX 소스를 입력하세요.");
+      setError("Paste your LaTeX source first.");
       return;
     }
     if (!t.includes("\\documentclass")) {
-      setError("전체 문서가 필요합니다: \\documentclass{...}부터 포함해야 합니다.");
+      setError("Paste a full document including \\documentclass{...}.");
       return;
     }
     setError(null);
@@ -69,7 +69,7 @@ export default function LatexCompilePage() {
       setPdfBlob(blob);
       setPdfUrl(url);
     } catch {
-      setError("네트워크 오류 — API가 켜져 있는지 확인하세요.");
+      setError("Network error — is the API running on port 8000?");
     } finally {
       setLoading(false);
     }
@@ -102,11 +102,11 @@ export default function LatexCompilePage() {
               SimpleResume
             </Link>
             <span className="text-zinc-600">/</span>
-            <h1 className="text-sm font-medium text-zinc-300">LaTeX → PDF (Docker TeX Live 권장)</h1>
+            <h1 className="text-sm font-medium text-zinc-300">LaTeX → PDF (Docker TeX Live)</h1>
           </div>
           <nav className="flex gap-3 text-sm">
             <Link href="/" className="text-zinc-400 hover:text-white">
-              홈 (Generate)
+              Home (Generate)
             </Link>
           </nav>
         </div>
@@ -122,22 +122,22 @@ export default function LatexCompilePage() {
             }`}
           >
             <p className="font-medium">
-              컴파일 환경(기본 Overleaf급):{" "}
+              Compile environment (Overleaf-grade default):{" "}
               {compiler.latex_docker_ready
                 ? `Docker TeX Live + latexmk (${compiler.latex_docker_image ?? ""})`
                 : compiler.latex_docker_image
-                  ? "Docker 이미지가 설정됐는데 Docker를 쓸 수 없습니다. Docker Desktop을 켜고 이미지를 빌드하세요."
-                  : "Docker 이미지가 비어 있어 호스트 TeX 폴백 모드입니다."}
+                  ? "Docker image is configured but Docker is unavailable. Start Docker Desktop and build the image."
+                  : "No Docker image set — host TeX fallback mode."}
             </p>
             {compiler.compile_hint && (
               <p className="mt-1 text-xs text-zinc-400">{compiler.compile_hint}</p>
             )}
             <p className="mt-2 text-xs text-zinc-500">
-              기본값은 TinyTeX가 아니라{" "}
-              <code className="rounded bg-zinc-800 px-1">docker compose build texlive</code> 로 만든{" "}
-              <code className="rounded bg-zinc-800 px-1">simpleresume-texlive:full</code> 입니다. API 재시작 후{" "}
-              <code className="rounded bg-zinc-800 px-1">/health</code>에서{" "}
-              <code className="rounded bg-zinc-800 px-1">latex_docker_ready</code> 확인.
+              Build with{" "}
+              <code className="rounded bg-zinc-800 px-1">docker compose build texlive</code> →{" "}
+              <code className="rounded bg-zinc-800 px-1">simpleresume-texlive:full</code>. Restart the API, then check{" "}
+              <code className="rounded bg-zinc-800 px-1">/health</code> →{" "}
+              <code className="rounded bg-zinc-800 px-1">latex_docker_ready</code>.
             </p>
           </div>
         )}
@@ -145,7 +145,7 @@ export default function LatexCompilePage() {
         <div className="grid gap-6 lg:grid-cols-2">
           <div className="flex flex-col rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
             <label htmlFor="tex-src" className="mb-2 text-sm font-medium text-zinc-300">
-              전체 .tex 붙여넣기
+              Paste full .tex source
             </label>
             <textarea
               id="tex-src"
@@ -155,7 +155,7 @@ export default function LatexCompilePage() {
                 setTex(e.target.value);
                 setError(null);
               }}
-              placeholder="% \\documentclass{article} ... 전체 소스"
+              placeholder="% Full document from \\documentclass{...}"
               rows={22}
               className="min-h-[420px] w-full flex-1 resize-y rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
             />
@@ -171,7 +171,7 @@ export default function LatexCompilePage() {
                 onClick={compile}
                 className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-40"
               >
-                {loading ? "컴파일 중…" : "Compile"}
+                {loading ? "Compiling…" : "Compile"}
               </button>
               <button
                 type="button"
@@ -179,7 +179,7 @@ export default function LatexCompilePage() {
                 disabled={!tex.trim()}
                 className="rounded-xl border border-zinc-600 px-4 py-2.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
               >
-                .tex 저장
+                Save .tex
               </button>
               <button
                 type="button"
@@ -187,17 +187,19 @@ export default function LatexCompilePage() {
                 disabled={!pdfBlob}
                 className="rounded-xl border border-zinc-600 px-4 py-2.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
               >
-                PDF 저장
+                Save PDF
               </button>
             </div>
           </div>
 
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
-            <p className="mb-3 text-sm font-medium text-zinc-300">미리보기</p>
+            <p className="mb-3 text-sm font-medium text-zinc-300">Preview</p>
             {!pdfUrl && !loading && (
-              <p className="py-16 text-center text-sm text-zinc-500">Compile을 누르면 여기에 PDF가 표시됩니다.</p>
+              <p className="py-16 text-center text-sm text-zinc-500">Click Compile to render the PDF here.</p>
             )}
-            {loading && <p className="py-16 text-center text-sm text-zinc-400">PDF 빌드 중… (Docker는 첫 실행이 길 수 있음)</p>}
+            {loading && (
+              <p className="py-16 text-center text-sm text-zinc-400">Building PDF… (first Docker run can be slow)</p>
+            )}
             {pdfUrl && !loading && (
               <div className="overflow-hidden rounded-lg border border-zinc-700 bg-white">
                 <iframe title="Compiled PDF" src={`${pdfUrl}#toolbar=1`} className="h-[min(85vh,1100px)] w-full" />

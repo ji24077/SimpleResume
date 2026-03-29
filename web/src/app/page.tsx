@@ -186,7 +186,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
       <header className="border-b border-zinc-800 bg-zinc-950/80 backdrop-blur">
-        <div className="mx-auto max-w-4xl px-4 py-4">
+        <div className="mx-auto max-w-6xl px-4 py-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <div className="flex flex-wrap items-center gap-3">
@@ -195,30 +195,32 @@ export default function Home() {
                   href="/latex"
                   className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:border-emerald-700 hover:text-emerald-300"
                 >
-                  LaTeX만 컴파일
+                  Compile LaTeX only
                 </Link>
               </div>
-              <p className="text-xs text-zinc-500">Big Tech–ready resumes · LaTeX · coaching</p>
+              <p className="text-xs text-zinc-500">
+                100+ résumés analyzed · ATS-friendly · LaTeX + coaching
+              </p>
             </div>
             {health && (
               <div className="max-w-md text-right text-xs">
                 {!health.ok && (
                   <p className="rounded-lg bg-red-950/60 px-2 py-1 text-red-300">
-                    API 연결 실패: 터미널에서{" "}
+                    API unreachable — run{" "}
                     <code className="rounded bg-zinc-800 px-1">cd api && uvicorn main:app --reload --port 8000</code>
                     {health.error ? ` — ${health.error}` : ""}
                   </p>
                 )}
                 {health.ok && !health.openai_configured && (
                   <p className="rounded-lg bg-amber-950/60 px-2 py-1 text-amber-200">
-                    <strong>OpenAI 미설정:</strong>{" "}
-                    <code className="rounded bg-zinc-800 px-1">{health.env_hint || "api/.env"}</code> 파일에{" "}
-                    <code className="rounded bg-zinc-800 px-1">OPENAI_API_KEY=sk-...</code> 넣고 API 서버를{" "}
-                    <strong>재시작</strong>하세요.
+                    <strong>OpenAI not configured:</strong> set{" "}
+                    <code className="rounded bg-zinc-800 px-1">OPENAI_API_KEY</code> in{" "}
+                    <code className="rounded bg-zinc-800 px-1">{health.env_hint || "api/.env"}</code> and{" "}
+                    <strong>restart</strong> the API.
                   </p>
                 )}
                 {health.ok && health.openai_configured && (
-                  <p className="text-emerald-500/90">API · OpenAI 연결됨</p>
+                  <p className="text-emerald-500/90">API &amp; OpenAI connected</p>
                 )}
               </div>
             )}
@@ -226,7 +228,7 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-4xl px-4 py-10">
+      <main className="mx-auto max-w-6xl px-4 py-10">
         {!result ? (
           <div className="space-y-12">
             <section
@@ -238,43 +240,79 @@ export default function Home() {
                 aria-hidden
               />
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-500/90">
-                Recruiter-tested · SWE / infra
+                SWE &amp; infra · Recruiter-tested patterns
               </p>
               <h2
                 id="hero-heading"
-                className="mt-3 max-w-3xl text-3xl font-bold leading-tight tracking-tight text-white md:text-4xl md:leading-tight"
+                className="mt-3 max-w-4xl text-3xl font-bold leading-tight tracking-tight text-white md:text-4xl md:leading-tight"
               >
-                Make sure your resume is{" "}
+                The most{" "}
                 <span className="bg-gradient-to-r from-emerald-300 to-emerald-500 bg-clip-text text-transparent">
-                  Big Tech–ready
-                </span>
+                  ATS-friendly, impactful, intuitive
+                </span>{" "}
+                résumé format — distilled from 100+ reviews
               </h2>
-              <p className="mt-5 max-w-2xl text-base leading-relaxed text-zinc-400 md:text-lg">
-                Your draft is <strong className="text-zinc-200">analyzed</strong> and rewritten into scannable
-                bullets, Dhruv-style LaTeX, section coaching, and a live PDF preview — the same bar we use for
-                top-tier hiring loops.
+              <p className="mt-5 max-w-3xl text-base leading-relaxed text-zinc-400 md:text-lg">
+                We analyzed <strong className="text-zinc-200">more than 100 résumés</strong> to extract what actually
+                works: machine-readable structure for ATS, tight metrics for impact, and a layout recruiters scan in
+                seconds. Your draft becomes that format — plus Dhruv-style LaTeX, section coaching, and a live PDF
+                preview.
               </p>
-              <ul className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:gap-4">
+
+              <div className="mt-8 grid gap-4 sm:grid-cols-3">
+                <div className="rounded-2xl border border-zinc-800/80 bg-zinc-950/50 px-5 py-4">
+                  <p className="text-2xl font-bold tabular-nums text-white">100+</p>
+                  <p className="mt-1 text-sm text-zinc-400">Résumés reviewed to lock the ideal structure</p>
+                </div>
+                <div className="rounded-2xl border border-zinc-800/80 bg-zinc-950/50 px-5 py-4">
+                  <p className="text-2xl font-bold tabular-nums text-emerald-400">30+</p>
+                  <p className="mt-1 text-sm text-zinc-400">Candidates who advanced to interviews with this approach</p>
+                </div>
+                <div className="rounded-2xl border border-emerald-900/40 bg-emerald-950/20 px-5 py-4">
+                  <p className="text-2xl font-bold tabular-nums text-white">~13</p>
+                  <p className="mt-1 text-sm text-zinc-300">
+                    Went on to offers at{" "}
+                    <span className="font-medium text-emerald-200/95">
+                      Amazon, IBM, DRW, Tesla, Google
+                    </span>{" "}
+                    and similar shops
+                  </p>
+                </div>
+              </div>
+
+              <ul className="mt-8 flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:gap-4">
                 <li className="inline-flex items-center gap-2 rounded-full border border-zinc-700/80 bg-zinc-900/60 px-4 py-2 text-sm text-zinc-200">
                   <span className="text-emerald-400" aria-hidden>
                     ✓
                   </span>
                   <span>
-                    <strong className="font-semibold text-white">30+</strong> candidates coached toward interviews
+                    <strong className="font-semibold text-white">ATS-friendly</strong> — parsing-safe text &amp; structure
                   </span>
                 </li>
                 <li className="inline-flex items-center gap-2 rounded-full border border-zinc-700/80 bg-zinc-900/60 px-4 py-2 text-sm text-zinc-200">
                   <span className="text-emerald-400" aria-hidden>
                     ✓
                   </span>
-                  Metrics, stack, and outcomes — not generic filler
+                  <span>
+                    <strong className="font-semibold text-white">Impactful</strong> — metrics, scope, outcomes — no filler
+                  </span>
                 </li>
                 <li className="inline-flex items-center gap-2 rounded-full border border-zinc-700/80 bg-zinc-900/60 px-4 py-2 text-sm text-zinc-200">
                   <span className="text-emerald-400" aria-hidden>
                     ✓
                   </span>
-                  Export <strong className="font-semibold text-white">.tex</strong>, coaching{" "}
-                  <strong className="font-semibold text-white">.md</strong>, PDF
+                  <span>
+                    <strong className="font-semibold text-white">Intuitive</strong> — scannable sections &amp; hierarchy
+                  </span>
+                </li>
+                <li className="inline-flex items-center gap-2 rounded-full border border-zinc-700/80 bg-zinc-900/60 px-4 py-2 text-sm text-zinc-200">
+                  <span className="text-emerald-400" aria-hidden>
+                    ✓
+                  </span>
+                  <span>
+                    Export <strong className="font-semibold text-white">.tex</strong>, coaching{" "}
+                    <strong className="font-semibold text-white">.md</strong>, PDF
+                  </span>
                 </li>
               </ul>
               <div className="mt-10 flex flex-wrap items-center gap-4">
@@ -297,9 +335,10 @@ export default function Home() {
 
             <div ref={resumeBuilderRef} id="resume-builder" className="scroll-mt-6 space-y-8">
               <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-8">
-                <h2 className="mb-2 text-sm font-medium text-zinc-300">1. Upload or paste</h2>
+                <h2 className="mb-2 text-sm font-medium text-zinc-300">1. Upload or paste your draft</h2>
                 <p className="mb-6 text-sm text-zinc-500">
-                  PDF, .tex, or .txt — we extract text and rewrite to high-readability bullets + full LaTeX.
+                  PDF, .tex, or plain text. We extract content and regenerate an ATS-friendly, high-impact layout in
+                  LaTeX — ready to preview and download.
                 </p>
                 <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-zinc-700 bg-zinc-900 px-6 py-12 transition hover:border-emerald-600/50 hover:bg-zinc-800/50">
                   <input
@@ -394,7 +433,7 @@ export default function Home() {
             {tab === "preview" && (
               <div className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-medium text-zinc-300">PDF preview (LaTeX → pdflatex, Overleaf-style)</p>
+                  <p className="text-sm font-medium text-zinc-300">PDF preview (Docker TeX Live + latexmk)</p>
                   <div className="flex flex-wrap items-center gap-3">
                     <button
                       type="button"
@@ -402,7 +441,7 @@ export default function Home() {
                       disabled={pdfLoading}
                       className="text-xs text-amber-400 hover:underline disabled:opacity-40"
                     >
-                      PDF 다시 빌드
+                      Rebuild PDF
                     </button>
                     <button
                       type="button"
@@ -418,12 +457,13 @@ export default function Home() {
                 )}
                 {pdfError && (
                   <div className="rounded-lg border border-amber-900/50 bg-amber-950/30 p-4 text-sm text-amber-100">
-                    <p className="font-medium text-amber-200">PDF 미리보기 불가</p>
+                    <p className="font-medium text-amber-200">PDF preview unavailable</p>
                     <p className="mt-2 whitespace-pre-wrap font-mono text-xs text-zinc-400">{pdfError.slice(0, 2000)}</p>
                     <p className="mt-3 text-xs text-zinc-500">
-                      Mac: <code className="rounded bg-zinc-800 px-1">brew install --cask basictex</code> 후 터미널에서{" "}
-                      <code className="rounded bg-zinc-800 px-1">sudo tlmgr update --self && sudo tlmgr install collection-latexextra</code>
-                      또는 MacTeX 설치. API 서버 재시작 후 다시 Generate.
+                      Ensure Docker is running and the TeX image is built:{" "}
+                      <code className="rounded bg-zinc-800 px-1">docker compose build texlive</code> from the repo root,
+                      then restart the API. See README for <code className="rounded bg-zinc-800 px-1">LATEX_DOCKER_*</code>{" "}
+                      in <code className="rounded bg-zinc-800 px-1">api/.env</code>.
                     </p>
                   </div>
                 )}
