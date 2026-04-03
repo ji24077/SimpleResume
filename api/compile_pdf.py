@@ -1,4 +1,4 @@
-"""Compile LaTeX to PDF: Docker/latexmk (Overleaf-like) → tectonic → pdflatex."""
+"""Compile LaTeX to PDF: Docker + latexmk in TeX Live full only (no host TinyTeX/pdflatex)."""
 
 import io
 import logging
@@ -20,10 +20,10 @@ _ASSET_SUFFIXES = frozenset(
 )
 
 _INSTALL_HINT = (
-    "Overleaf parity: `docker compose build texlive`, set in api/.env: "
-    "LATEX_DOCKER_IMAGE=simpleresume-texlive:full (do not rely on export-only — restart API after .env). "
-    "With an image set, host TinyTeX is NOT used unless LATEX_DOCKER_ALLOW_FALLBACK=1. "
-    "Optional: LATEX_DOCKER_ONLY=1. No Docker: full MacTeX/TeX Live + latexmk."
+    "PDF requires Docker TeX Live (host latexmk/pdflatex/TinyTeX are disabled). "
+    "From repo root: `docker compose build texlive`. In api/.env set "
+    "LATEX_DOCKER_IMAGE=simpleresume-texlive:full, ensure Docker Desktop is running and "
+    "`docker` is in PATH, then restart the API."
 )
 
 
@@ -60,22 +60,28 @@ def _latex_log_error_excerpt(log: str) -> str:
     """Pull the real failure from pdflatex .log (skip long package-loading spam)."""
     if not log:
         return ""
-    # Last occurrence of LaTeX error / fatal markers
-    for marker in (
+    markers = (
+        "Something's wrong--perhaps a missing",
+        "Lonely \\item",
+        "LaTeX Error:",
         "! LaTeX Error:",
         "! LaTeX Error",
         "! Undefined control sequence.",
         "! I can't find file",
-        "! ",
-        "Fatal error",
+        "Runaway argument",
         "Emergency stop",
-    ):
+        "Fatal error",
+        "! ",
+    )
+    best_idx = -1
+    for marker in markers:
         idx = log.rfind(marker)
-        if idx != -1:
-            start = max(0, idx - 400)
-            end = min(len(log), idx + 4500)
-            return log[start:end].strip()
-    # No '!' found — tail only
+        if idx > best_idx:
+            best_idx = idx
+    if best_idx != -1:
+        start = max(0, best_idx - 600)
+        end = min(len(log), best_idx + 5000)
+        return log[start:end].strip()
     return log[-5000:].strip()
 
 
@@ -122,7 +128,7 @@ def normalize_to_dhruv_template(latex: str) -> str:
     """
     Force Dhruv preamble/macros; wrap extracted body in exactly one \\begin{document}...\\end{document}.
     Set env ``LATEX_PORTABLE_PREAMBLE=1`` to comment out ``fullpage`` / ``glyphtounicode`` in the preamble
-    so host TinyTeX / minimal installs and some web compile paths fail less often (Docker full TeX can leave it off).
+    for a portable retry variant inside Docker (Docker full TeX usually leaves this off).
     """
     latex = latex.strip()
     if not latex:
@@ -256,43 +262,6 @@ def _unlink_resume_pdf(work_dir: Path) -> None:
             pass
 
 
-def _run_latexmk(tex_file: Path, work_dir: Path) -> tuple[bool, dict[str, Any]]:
-    """latexmk -pdf (multi-pass), Overleaf-style."""
-    latexmk = shutil.which("latexmk")
-    if not latexmk:
-        return False, {
-            "engine": "latexmk",
-            "exit_code": None,
-            "log_excerpt": "latexmk not found in PATH",
-        }
-    proc = subprocess.run(
-        _latexmk_argv(tex_file.name),
-        cwd=str(work_dir),
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
-    pdf = work_dir / "resume.pdf"
-    if pdf.is_file() and pdf.stat().st_size > 0:
-        return True, {}
-    log_raw = ""
-    log_path = work_dir / "resume.log"
-    if log_path.is_file():
-        log_raw = log_path.read_text(encoding="utf-8", errors="replace")
-    excerpt = _latex_log_error_excerpt(log_raw)
-    combined = ((proc.stderr or "") + "\n" + (proc.stdout or "")).strip()
-    if not excerpt and combined:
-        excerpt = combined[-8000:]
-    elif excerpt and proc.returncode != 0 and len(excerpt) < 200 and combined:
-        excerpt = excerpt + "\n---\n" + combined[-4000:]
-    return False, {
-        "engine": "latexmk",
-        "exit_code": proc.returncode,
-        "log_excerpt": excerpt or combined or "(no log)",
-        "log_bytes": len(log_raw),
-    }
-
-
 def _run_latexmk_docker(work_dir: Path, image: str) -> tuple[bool, dict[str, Any]]:
     """TeX Live full (or similar) in Docker — fixed environment, no host TinyTeX drift."""
     if not shutil.which("docker"):
@@ -335,12 +304,186 @@ def _run_latexmk_docker(work_dir: Path, image: str) -> tuple[bool, dict[str, Any
     }
 
 
+def _normalize_tex_line_endings(tex: str) -> str:
+    r"""CRLF / lone CR break LaTeX commands (e.g. ``\resume`` + CR + ``ProjectHeading`` → weird errors)."""
+    if not tex:
+        return tex
+    return tex.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _fix_line_start_missing_backslash_resume_project_heading(tex: str) -> str:
+    r"""Model drops leading backslash: ``resumeProjectHeading{`` → ``\resumeProjectHeading{``."""
+    return re.sub(r"(?m)^(\s*)resumeProjectHeading\s*\{", r"\1\\resumeProjectHeading{", tex)
+
+
+def _ensure_projects_subheading_list(tex: str) -> str:
+    r"""
+    ``\resumeProjectHeading`` expands to ``\item[]`` and must be inside ``\resumeSubHeadingListStart`` …
+    ``End`` (same as Experience). Models often omit the outer list after ``\section{Project}`` /
+    ``\section{Projects}``, which triggers interactive-style failures on the first project line.
+    """
+    pos = 0
+    out: list[str] = []
+    sec_re = re.compile(r"\\section\s*\{\s*Projects?\s*\}", re.IGNORECASE)
+    while True:
+        m = sec_re.search(tex, pos)
+        if not m:
+            out.append(tex[pos:])
+            return "".join(out)
+        out.append(tex[pos : m.start()])
+        header_end = tex.find("\n", m.end())
+        if header_end == -1:
+            out.append(tex[m.start() :])
+            return "".join(out)
+        content_start = header_end + 1
+        n = re.search(
+            r"\\section\s*\{|\\end\s*\{\s*document\s*\}",
+            tex[content_start:],
+            flags=re.IGNORECASE,
+        )
+        block_end = content_start + (n.start() if n else len(tex) - content_start)
+        block = tex[content_start:block_end]
+        ph = block.find(r"\resumeProjectHeading")
+        if ph != -1:
+            rs = block.find(r"\resumeSubHeadingListStart")
+            if rs == -1 or rs > ph:
+                wrapped = (
+                    "\n"
+                    + r"\resumeSubHeadingListStart"
+                    + "\n"
+                    + block.rstrip()
+                    + "\n"
+                    + r"\resumeSubHeadingListEnd"
+                    + "\n"
+                )
+                out.append(tex[m.start() : content_start] + wrapped)
+                pos = block_end
+                continue
+        out.append(tex[m.start() : block_end])
+        pos = block_end
+
+
 def _fix_typo_extbf(tex: str) -> str:
     r"""Model drops backslash: ``extbf{`` → ``\textbf{`` (e.g. ``\resumeSubheading{..}{}{ extbf{Title}}{}``)."""
     tex = re.sub(r"\}\s*\{\s*extbf\s*\{", r"}{\\textbf{", tex)
     tex = re.sub(r"\{\s*extbf\s*\{", r"{\\textbf{", tex)
     tex = re.sub(r"(?<![\\a-zA-Z])extbf\s*\{", r"\\textbf{", tex)
     return tex
+
+
+def _fix_line_start_missing_backslash_vspace(tex: str) -> str:
+    r"""Model often emits ``vspace{4pt}`` after ``\\`` instead of ``\vspace{4pt}``."""
+    return re.sub(r"(?m)^(\s*)vspace\{", r"\1\\vspace{", tex)
+
+
+def _fix_lonely_resume_items_in_sublist(tex: str) -> str:
+    r"""
+    ``\resumeItem`` expands to ``\item`` and must sit inside ``\resumeItemListStart`` … ``End``.
+    Sections like "Industry Designations" often omit the list wrapper (compile error near first ``\resumeItem``).
+    """
+    start_tok = r"\resumeSubHeadingListStart"
+    end_tok = r"\resumeSubHeadingListEnd"
+    pos = 0
+    chunks: list[str] = []
+    while pos < len(tex):
+        i = tex.find(start_tok, pos)
+        if i == -1:
+            chunks.append(tex[pos:])
+            break
+        chunks.append(tex[pos:i])
+        depth = 1
+        j = i + len(start_tok)
+        end_pos = -1
+        while j < len(tex) and depth > 0:
+            ns = tex.find(start_tok, j)
+            ne = tex.find(end_tok, j)
+            if ne == -1:
+                chunks.append(tex[i:])
+                return "".join(chunks)
+            if ns != -1 and ns < ne:
+                depth += 1
+                j = ns + len(start_tok)
+            else:
+                depth -= 1
+                if depth == 0:
+                    end_pos = ne
+                    break
+                j = ne + len(end_tok)
+        if end_pos == -1:
+            chunks.append(tex[i:])
+            break
+        inner = tex[i + len(start_tok) : end_pos]
+        stripped = inner.strip()
+        if (
+            r"\resumeItem" in inner
+            and r"\resumeItemListStart" not in inner
+            and r"\resumeSubheading" not in inner
+            and r"\resumeProjectHeading" not in inner
+        ):
+            inner_new = (
+                "\n"
+                + r"\resumeItemListStart"
+                + "\n"
+                + stripped
+                + "\n"
+                + r"\resumeItemListEnd"
+                + "\n"
+            )
+            chunks.append(start_tok + inner_new + end_tok)
+        else:
+            chunks.append(tex[i : end_pos + len(end_tok)])
+        pos = end_pos + len(end_tok)
+    return "".join(chunks)
+
+
+def _wrap_bare_https_after_pipe(tex: str) -> str:
+    """Header lines often use bare ``https://...``; ``_`` in URL breaks text mode — wrap with ``\\url``."""
+    prev = None
+    while prev != tex:
+        prev = tex
+        tex = re.sub(
+            r"(\$\|\$\s*)(https?://[^\s\\}%$]+)",
+            r"\1\\url{\2}",
+            tex,
+        )
+    return tex
+
+
+def _fix_technical_skills_broken_linebreaks(tex: str) -> str:
+    r"""
+    Models often emit ``} \ `` (single backslash + space) before the next line instead of a proper
+    LaTeX line break ``\\``. Fix only inside ``\section{Technical Skills}`` … ``\end{itemize}``.
+    """
+    m = re.search(
+        r"(\\section\s*\{\s*Technical Skills\s*\}.*?\\end\s*\{\s*itemize\s*\})",
+        tex,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    if not m:
+        return tex
+    block = m.group(1)
+    # Wrong: `} \` or `}  \` then newline; right: `}` then `\\` then newline.
+    fixed = re.sub(
+        r"(\})\s*\\\s*\n(?=\s*\\vspace)",
+        r"}\n\\\\\n",
+        block,
+    )
+    fixed = re.sub(
+        r"(\})\s*\\\s*\n(?=\s*\\textbf)",
+        r"}\n\\\\\n",
+        fixed,
+    )
+    return tex[: m.start()] + fixed + tex[m.end() :]
+
+
+def _fix_project_heading_literal_stack_placeholder(tex: str) -> str:
+    r"""Prompt example ``| stack`` is sometimes copied verbatim; strip that placeholder after ``\textbf{...}``."""
+    return re.sub(
+        r"(\\textbf\{[^}]+\})\s*\|\s*stack\b",
+        r"\1",
+        tex,
+        flags=re.IGNORECASE,
+    )
 
 
 def _fix_unclosed_center_before_first_section(tex: str) -> str:
@@ -374,14 +517,30 @@ def sanitize_latex_for_overleaf(tex: str) -> str:
     Fix common model mistakes that break Overleaf / pdflatex:
     - Missing ``\\end{center}`` before first ``\\section`` (header stuck inside center)
     - ``extbf`` typo instead of ``\\textbf``
+    - Line-start ``vspace{`` → ``\\vspace{`` (missing backslash after ``\\\\``)
+    - ``\\resumeItem`` without surrounding ``\\resumeItemListStart`` (e.g. Industry Designations block)
+    - Bare ``https://`` after ``$|$`` → ``\\url{...}`` (underscores in URL)
     - \\\\& → \\& (Misplaced alignment tab & inside \\resumeSubheading tabular)
     - \\\\% → \\% (AI often emits double backslash before % → forced line break + broken layout)
     - \\href{}{Label} → Label (empty URL breaks hyperref / looks wrong)
+    - CRLF / lone ``\\r`` normalized to ``\\n`` (prevents split macro names)
+    - ``\\section{Project(s)}`` then ``\\resumeProjectHeading`` without ``\\resumeSubHeadingListStart`` → wrap
+    - Line-start ``resumeProjectHeading{`` → ``\\resumeProjectHeading{``
+    - ``\\textbf{...} | stack`` (literal placeholder) → drop ``| stack``
+    - Technical Skills: ``} \\ `` before ``\\vspace`` / ``\\textbf`` → ``} \\\\`` newline
     """
     if not tex:
         return tex
+    tex = _normalize_tex_line_endings(tex)
+    tex = _fix_project_heading_literal_stack_placeholder(tex)
     tex = _fix_typo_extbf(tex)
+    tex = _fix_line_start_missing_backslash_vspace(tex)
+    tex = _fix_line_start_missing_backslash_resume_project_heading(tex)
+    tex = _ensure_projects_subheading_list(tex)
+    tex = _fix_lonely_resume_items_in_sublist(tex)
+    tex = _wrap_bare_https_after_pipe(tex)
     tex = _fix_unclosed_center_before_first_section(tex)
+    tex = _fix_technical_skills_broken_linebreaks(tex)
     bad = "\\\\&"  # two backslashes + & (LaTeX linebreak + tab char in tabular)
     good = "\\&"
     while bad in tex:
@@ -392,74 +551,6 @@ def sanitize_latex_for_overleaf(tex: str) -> str:
         tex = tex.replace(badp, goodp)
     tex = re.sub(r"\\href\{\s*\}\{([^}]*)\}", r"\1", tex)
     return tex
-
-
-def _run_pdflatex(tex_file: Path, out_dir: Path) -> tuple[bool, dict[str, Any]]:
-    pdflatex = shutil.which("pdflatex")
-    if not pdflatex:
-        return False, {
-            "engine": "pdflatex",
-            "exit_code": None,
-            "log_excerpt": "pdflatex not found in PATH",
-        }
-    last_code: int | None = None
-    for _ in range(2):
-        proc = subprocess.run(
-            [
-                pdflatex,
-                "-interaction=nonstopmode",
-                "-halt-on-error",
-                "-file-line-error",
-                "-no-shell-escape",
-                f"-output-directory={out_dir}",
-                tex_file.name,
-            ],
-            cwd=str(out_dir),
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        last_code = proc.returncode
-    pdf = out_dir / "resume.pdf"
-    if pdf.is_file() and pdf.stat().st_size > 0:
-        return True, {}
-    log_path = out_dir / "resume.log"
-    log_raw = ""
-    if log_path.is_file():
-        log_raw = log_path.read_text(encoding="utf-8", errors="replace")
-    excerpt = _latex_log_error_excerpt(log_raw)
-    if not excerpt and log_raw:
-        excerpt = log_raw[-4000:]
-    return False, {
-        "engine": "pdflatex",
-        "exit_code": last_code,
-        "log_excerpt": excerpt,
-        "log_bytes": len(log_raw),
-    }
-
-
-def _run_tectonic(tex_file: Path, out_dir: Path) -> tuple[bool, dict[str, Any]]:
-    tectonic = shutil.which("tectonic")
-    if not tectonic:
-        return False, {"engine": "tectonic", "exit_code": None, "log_excerpt": "tectonic not found in PATH"}
-    proc = subprocess.run(
-        [tectonic, "--outdir", str(out_dir), str(tex_file)],
-        capture_output=True,
-        text=True,
-        timeout=180,
-    )
-    pdf = out_dir / "resume.pdf"
-    if pdf.is_file() and pdf.stat().st_size > 0:
-        return True, {}
-    combined = (proc.stderr or "") + "\n" + (proc.stdout or "")
-    excerpt = combined.strip()
-    if len(excerpt) > 6000:
-        excerpt = excerpt[-6000:]
-    return False, {
-        "engine": "tectonic",
-        "exit_code": proc.returncode,
-        "log_excerpt": excerpt,
-    }
 
 
 def _strip_problematic_inputs(tex: str) -> str:
@@ -499,7 +590,7 @@ _FA_STUB_AFTER_DOCCLASS = """
 
 
 def _strip_fontawesome5_package(tex: str) -> str:
-    """TinyTeX often lacks fontawesome5; Docker / full TeX Live include it."""
+    """Strip fontawesome5 for a portable retry variant if the model injected it."""
     stripped = re.sub(
         r"(?im)^[ \t]*\\usepackage(?:\s*\[[^]]*\])?\s*\{\s*fontawesome5\s*\}\s*$",
         "% fontawesome5 omitted — install: tlmgr install fontawesome5, or use Docker TeX Live",
@@ -514,16 +605,7 @@ def _strip_fontawesome5_package(tex: str) -> str:
 
 
 def _should_use_portable_variant_order() -> bool:
-    """
-    Without a Docker image we only have host TeX (often TinyTeX): try fullpage-free variants first.
-    If LATEX_DOCKER_IMAGE is set but docker CLI is missing and fallback is on, same idea.
-    """
-    img = os.environ.get("LATEX_DOCKER_IMAGE", "").strip()
-    has_docker = bool(shutil.which("docker"))
-    if not img:
-        return True
-    if _env_truthy("LATEX_DOCKER_ALLOW_FALLBACK") and not has_docker:
-        return True
+    """Docker TeX Live full: prefer canonical preamble first; portable strips are last-resort retries."""
     return False
 
 
@@ -566,86 +648,44 @@ def _compile_variants(tex_source: str, *, portable_first: bool) -> list[tuple[st
 
 def _try_compile_variant(work_dir: Path, variant_label: str) -> tuple[bool, list[dict[str, Any]]]:
     """
-    Engine order: Docker latexmk (if configured) → host latexmk → tectonic → pdflatex×2.
-
-    If LATEX_DOCKER_IMAGE is set, host TeX is skipped unless LATEX_DOCKER_ALLOW_FALLBACK=1
-    (avoids silent TinyTeX when Docker was intended).
-
-    LATEX_DOCKER_ONLY=1: Docker latexmk only.
+    Docker latexmk only (TeX Live full image). Host latexmk / tectonic / pdflatex are not used.
     """
-    tex_path = work_dir / "resume.tex"
     pdf_path = work_dir / "resume.pdf"
     attempts: list[dict[str, Any]] = []
 
-    docker_only = _env_truthy("LATEX_DOCKER_ONLY")
-    allow_fallback = _env_truthy("LATEX_DOCKER_ALLOW_FALLBACK")
     docker_image = os.environ.get("LATEX_DOCKER_IMAGE", "").strip()
     has_docker = bool(shutil.which("docker"))
 
-    if docker_only:
-        if not docker_image or not has_docker:
-            return False, [
-                {
-                    "engine": "latexmk-docker",
-                    "exit_code": None,
-                    "log_excerpt": "LATEX_DOCKER_ONLY=1 requires LATEX_DOCKER_IMAGE and docker in PATH.",
-                    "variant": variant_label,
-                }
-            ]
-        _unlink_resume_pdf(work_dir)
-        ok, info = _run_latexmk_docker(work_dir, docker_image)
-        if info:
-            attempts.append({**info, "variant": variant_label})
-        if ok and pdf_path.is_file() and pdf_path.stat().st_size > 0:
-            return True, attempts
-        return False, attempts
+    if not docker_image:
+        return False, [
+            {
+                "engine": "latexmk-docker",
+                "exit_code": None,
+                "log_excerpt": (
+                    "LATEX_DOCKER_IMAGE is not set. Set it in api/.env (e.g. "
+                    "simpleresume-texlive:full) and run `docker compose build texlive` from the repo root."
+                ),
+                "variant": variant_label,
+            }
+        ]
 
-    if docker_image:
-        if not has_docker:
-            msg = (
-                "LATEX_DOCKER_IMAGE is set but `docker` is not in PATH. "
-                "Start Docker Desktop, or remove LATEX_DOCKER_IMAGE, or set LATEX_DOCKER_ALLOW_FALLBACK=1 to use host TeX."
-            )
-            if not allow_fallback:
-                return False, [
-                    {
-                        "engine": "latexmk-docker",
-                        "exit_code": None,
-                        "log_excerpt": msg,
-                        "variant": variant_label,
-                    }
-                ]
-        else:
-            _unlink_resume_pdf(work_dir)
-            ok, info = _run_latexmk_docker(work_dir, docker_image)
-            if info:
-                attempts.append({**info, "variant": variant_label})
-            if ok and pdf_path.is_file() and pdf_path.stat().st_size > 0:
-                return True, attempts
-            if not allow_fallback:
-                return False, attempts
-
-    if shutil.which("latexmk"):
-        _unlink_resume_pdf(work_dir)
-        ok, info = _run_latexmk(tex_path, work_dir)
-        if info:
-            attempts.append({**info, "variant": variant_label})
-        if ok and pdf_path.is_file() and pdf_path.stat().st_size > 0:
-            return True, attempts
+    if not has_docker:
+        return False, [
+            {
+                "engine": "latexmk-docker",
+                "exit_code": None,
+                "log_excerpt": (
+                    "`docker` is not in PATH. Start Docker Desktop (or install the Docker CLI). "
+                    "Host TeX / TinyTeX is not used for PDF builds."
+                ),
+                "variant": variant_label,
+            }
+        ]
 
     _unlink_resume_pdf(work_dir)
-    ok, info = _run_tectonic(tex_path, work_dir)
-    if not ok and info:
+    ok, info = _run_latexmk_docker(work_dir, docker_image)
+    if info:
         attempts.append({**info, "variant": variant_label})
-    if not ok:
-        _unlink_resume_pdf(work_dir)
-        ok2, info2 = _run_pdflatex(tex_path, work_dir)
-        if not ok2 and info2:
-            attempts.append({**info2, "variant": variant_label})
-        ok = ok2
-    else:
-        ok = True
-
     if ok and pdf_path.is_file() and pdf_path.stat().st_size > 0:
         return True, attempts
     return False, attempts
@@ -657,8 +697,7 @@ def compile_latex_to_pdf(tex_source: str) -> tuple[bytes | None, dict[str, Any] 
     error_detail is JSON-serializable for HTTP 422 responses.
 
     Uses a temp project dir (Overleaf-style): optional files from api/tex_assets/ plus resume.tex.
-    Prefer LATEX_DOCKER_IMAGE + latexmk in TeX Live full, then host latexmk, then tectonic/pdflatex.
-    Retries with fullpage and/or glyphtounicode stripped for TinyTeX / tectonic quirks.
+    Docker + latexmk in TeX Live full only. Retries alternate preamble variants if the canonical build fails.
     """
     tex_source = tex_source.strip()
     tex_source = sanitize_unicode_for_latex(tex_source)
@@ -781,7 +820,7 @@ def count_pdf_pages_from_bytes(pdf_bytes: bytes) -> int:
 def pdf_bottom_strip_mean_luminance(
     pdf_bytes: bytes,
     *,
-    bottom_fraction: float = 0.22,
+    bottom_fraction: float = 0.15,
     dpi: int = 100,
 ) -> float | None:
     """
@@ -853,8 +892,8 @@ def pdf_bottom_strip_mean_luminance(
 def pdf_first_page_bottom_underfull(
     pdf_bytes: bytes,
     *,
-    bottom_fraction: float = 0.22,
-    mean_threshold: float = 237.0,
+    bottom_fraction: float = 0.15,
+    mean_threshold: float = 233.0,
     dpi: int = 100,
 ) -> bool | None:
     """True if bottom strip mean luminance >= ``mean_threshold`` (too much white)."""
@@ -873,26 +912,22 @@ def compiler_available() -> dict[str, Any]:
     pdflatex = bool(shutil.which("pdflatex"))
     tectonic = bool(shutil.which("tectonic"))
     docker_ready = bool(docker_image and has_docker)
-    docker_only = _env_truthy("LATEX_DOCKER_ONLY")
-    allow_fallback = _env_truthy("LATEX_DOCKER_ALLOW_FALLBACK")
     docker_network = os.environ.get("LATEX_DOCKER_NETWORK", "none").strip() or "none"
 
-    if docker_only:
-        pdf_compile = docker_ready
-    elif docker_image and not allow_fallback:
-        pdf_compile = docker_ready
-    else:
-        pdf_compile = docker_ready or latexmk or pdflatex or tectonic
+    pdf_compile = docker_ready
 
     hint: str | None = None
-    if docker_only and not docker_ready:
-        hint = "LATEX_DOCKER_ONLY=1: set LATEX_DOCKER_IMAGE and ensure docker is in PATH."
-    elif docker_image and not has_docker and not allow_fallback:
-        hint = "LATEX_DOCKER_IMAGE is set but docker CLI missing — start Docker or set LATEX_DOCKER_ALLOW_FALLBACK=1."
-    elif not pdf_compile:
-        hint = "No compiler: set LATEX_DOCKER_IMAGE + Docker, or install latexmk/TeX Live / pdflatex."
-    elif docker_image and not has_docker and allow_fallback:
-        hint = "Docker not in PATH; will use host TeX (LATEX_DOCKER_ALLOW_FALLBACK=1)."
+    if not docker_image:
+        hint = (
+            "Set LATEX_DOCKER_IMAGE=simpleresume-texlive:full in api/.env, run "
+            "`docker compose build texlive` from the repo root, restart the API. "
+            "Host latexmk/pdflatex is not used."
+        )
+    elif not has_docker:
+        hint = (
+            "Docker CLI not in PATH — start Docker Desktop. "
+            "LATEX_DOCKER_IMAGE is set but PDF builds require a working `docker` command."
+        )
 
     pdfinfo = bool(shutil.which("pdfinfo"))
     qpdf = bool(shutil.which("qpdf"))
@@ -913,8 +948,8 @@ def compiler_available() -> dict[str, Any]:
         "docker": has_docker,
         "latex_docker_image": docker_image or None,
         "latex_docker_ready": docker_ready,
-        "latex_docker_only": docker_only,
-        "latex_docker_allow_fallback": allow_fallback,
+        "latex_docker_only": True,
+        "latex_docker_allow_fallback": False,
         "latex_docker_network": docker_network,
         "pdf_compile": pdf_compile,
         "compile_hint": hint,

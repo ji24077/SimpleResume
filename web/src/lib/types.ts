@@ -31,4 +31,8 @@ export type GenerateResponse = {
   pdf_layout_underfull?: boolean | null;
   /** LLM rounds used to densify after layout check */
   density_expand_rounds?: number;
+  /** ATS smoke-test issue code if any; omitted when passed */
+  ats_issue_code?: string | null;
+  /** Checker LLM diagnostic issues (RESUME_QUALITY_CHECKER=1) */
+  quality_issues?: Array<Record<string, unknown>> | null;
 };

@@ -124,7 +124,10 @@ export default function Home() {
     fetch("/api/compile-pdf", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ latex_document: result.latex_document }),
+      body: JSON.stringify({
+        latex_document: result.latex_document,
+        heal_with_llm: true,
+      }),
     })
       .then(async (res) => {
         if (cancelled) return;

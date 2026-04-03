@@ -41,7 +41,7 @@
 |------|------|
 | 하단 밝기 측정 | `compile_pdf.pdf_bottom_strip_mean_luminance` (`pdftoppm` + Pillow) |
 | underfull 판정 | `main.py` — 골든: `mean > GOLDEN_MEAN + MARGIN`, 절대: `mean >= THRESHOLD` |
-| 확장 LLM | `_revision_user_expand_density` |
+| 확장 LLM | `prompts.revision_user_densify` |
 | 운영 체크 | `api/OPS_CHECKLIST.md`, `/health` → `pdf_density_check_ready` |
 
 **엣지케이스**
@@ -64,11 +64,20 @@
 | `extbf{` → `\textbf{` | 백슬래시 누락 오타. |
 | `\begin{center}` 미종료 + 첫 `\section` | `\end{center}` 자동 삽입(Dhruv 헤더 깨짐 방지). |
 | 유니코드 치환 + 탭→공백 | pdflatex “invalid character”. |
-| `LATEX_PORTABLE_PREAMBLE=1` | 프리앰블에서 `fullpage` / `glyphtounicode` 줄 완화(TinyTeX·웹 경로). |
+| `LATEX_PORTABLE_PREAMBLE=1` | Docker 컴파일 재시도용 프리앰블 변형(`fullpage` / `glyphtounicode` 생략). |
+| CRLF / lone `\\r` → `\\n` | 매크로 이름이 쪼개져 `\\resume` + CR + `ProjectHeading` 식 오류 방지. |
+| `\\section{Project(s)}` + `\\resumeProjectHeading` 바깥 리스트 | 모델이 `\\resumeSubHeadingListStart` 생략 시 `_ensure_projects_subheading_list`가 감쌈. |
+| 줄 시작 `resumeProjectHeading{` | 선행 `\\` 누락 시 `_fix_line_start_missing_backslash_resume_project_heading` 보정. |
+
+### Projects / `\\resumeProjectHeading` (반드시 지킬 것)
+
+- Dhruv 매크로 `\\resumeProjectHeading`은 **내부에 `\\item[]`**가 있어서, **반드시** `\\resumeSubHeadingListStart` … `\\resumeSubHeadingListEnd` **안에만** 둔다.
+- `\\section{Projects}` 직후에 곧바로 `\\resumeProjectHeading{...}{...}`만 두면 pdflateX가 대화형 프롬프트(`Try typing <return>`) 쪽으로 죽을 수 있음 → **프롬프트 `LATEX_BODY_SHAPE`에 고정**해 두었고, 서버는 `sanitize_latex_for_overleaf`에서 한 번 더 감싼다.
+- 새 템플릿/매크로를 넣을 때도 **“`\\item`을 쓰는 커스텀 블록은 겉에 list 매크로 필수”** 규칙을 같이 검토할 것.
 
 **건드리면 안 되는 것(주의)**
 
-- `normalize_to_dhruv_template` / `dhruv_preamble.tex` — 템플릿·매크로와 프롬프트 `LATEX_FORMAT_LOCK`이 **한 세트**. 한쪽만 바꾸면 모델 출력과 불일치.
+- `normalize_to_dhruv_template` / `dhruv_preamble.tex` — 템플릿·매크로와 user 메시지 `=== TEMPLATE ===`(동일 파일 내용)이 **한 세트**. 한쪽만 바꾸면 모델 출력과 불일치.
 - `compile_latex_to_pdf` 내부 **variant 순서**(`portable_first`) — Docker vs 호스트 TeX 실패 시 재시도 순서.
 
 ---
@@ -107,7 +116,7 @@
 
 ```
 api/main.py          — 라우트, iterate_generate_progress, 연락처, 설정 동기화
-api/prompts.py       — 시스템 프롬프트·템플릿 락
+api/prompts.py       — 짧은 `SYSTEM_PROMPT_CORE` + user에 `TEMPLATE`/`POLICIES`/`OUTPUT`/`RESUME SOURCE`; 리비전은 `revision_user_one_page` / `revision_user_densify` (신호+현재 LaTeX)
 api/compile_pdf.py   — 컴파일, sanitize, 측정, portable preamble
 api/OPS_CHECKLIST.md — 운영 체크리스트
 api/scripts/measure_pdf_bottom_mean.py — 골든 PDF 밝기 측정

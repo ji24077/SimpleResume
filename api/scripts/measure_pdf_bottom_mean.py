@@ -24,7 +24,7 @@ from compile_pdf import pdf_bottom_strip_mean_luminance  # noqa: E402
 def main() -> None:
     p = argparse.ArgumentParser(description="Measure PDF page-1 bottom luminance for density calibration.")
     p.add_argument("pdf", type=Path, help="Path to a 1-page (or first page used) PDF")
-    p.add_argument("--bottom-frac", type=float, default=0.22, help="Bottom fraction of raster (default 0.22)")
+    p.add_argument("--bottom-frac", type=float, default=0.15, help="Bottom fraction of raster (default 0.15)")
     p.add_argument("--dpi", type=int, default=100, help="Raster DPI (default 100, match API default)")
     p.add_argument("--margin", type=float, default=12.0, help="Suggested golden_margin for .env (default 12)")
     args = p.parse_args()

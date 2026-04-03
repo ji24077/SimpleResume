@@ -12,7 +12,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from compile_pdf import (
@@ -24,7 +24,36 @@ from compile_pdf import (
     sanitize_latex_for_overleaf,
     sanitize_unicode_for_latex,
 )
-from prompts import build_system_prompt
+from prompts import (
+    build_checker_user,
+    build_generation_user_message,
+    build_structured_generation_user_message,
+    checker_system,
+    densify_system,
+    fixer_compile_system,
+    fixer_system,
+    generator_system,
+    revision_user_densify,
+    revision_user_densify_structured,
+    revision_user_fix_ats,
+    revision_user_fix_ats_structured,
+    revision_user_fix_schema,
+    revision_user_fix_compile,
+    revision_user_fix_compile_structured,
+    revision_user_one_page,
+    revision_user_fit_one_page_structured,
+    structured_densify_system,
+    structured_fixer_compile_system,
+    structured_fixer_system,
+    structured_generator_system,
+)
+from structured_resume import (
+    ResumeSchemaError,
+    build_latex_document,
+    format_resume_validation_errors,
+    parse_resume_data,
+)
+from resume_pipeline.pipeline.ats_check import ats_smoke_test, should_autofix_ats
 
 # .env는 api/ 우선, 없으면 레포 루트 (cwd와 무관)
 _API_DIR = Path(__file__).resolve().parent
@@ -41,13 +70,10 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o"
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
-    # Overleaf-grade default: TeX Live full in Docker + latexmk only (no silent TinyTeX).
-    # Opt out in api/.env: LATEX_DOCKER_IMAGE=  LATEX_DOCKER_ONLY=0  LATEX_DOCKER_ALLOW_FALLBACK=1
+    # PDF = Docker TeX Live full + latexmk only (host latexmk/pdflatex/TinyTeX are not used).
     latex_docker_image: str = Field(default="simpleresume-texlive:full")
-    latex_docker_only: bool = Field(default=True)
-    latex_docker_allow_fallback: bool = Field(default=False)
     latex_docker_network: str = "none"
-    # 1 = strip fullpage + glyphtounicode from canonical preamble before compile (friendlier to TinyTeX / some web paths).
+    # 1 = strip fullpage + glyphtounicode for a portable preamble retry inside Docker (rare).
     latex_portable_preamble: bool = Field(default=False)
 
     # After generate: compile PDF and re-prompt if >1 page (0 = disable).
@@ -56,13 +82,26 @@ class Settings(BaseSettings):
     # When strict 1-page PDF still has a large bottom whitespace (measured via pdftoppm + Pillow),
     # ask the model to densify up to this many times (0 = skip density loop).
     resume_density_expand_max: int = Field(default=2, ge=0, le=6)
-    resume_underfull_bottom_frac: float = Field(default=0.22, ge=0.08, le=0.45)
-    resume_underfull_mean_threshold: float = Field(default=237.0, ge=210.0, le=252.0)
+    # Sample mean luminance in this bottom fraction of page 1; bright strip ⇒ underfull (empty).
+    # 0.15 ≈ “하단 15%가 거의 흰색이면 덜 찬 페이지”로 보는 실무 기본값.
+    resume_underfull_bottom_frac: float = Field(default=0.15, ge=0.08, le=0.45)
+    # Slightly below 237 so one-page PDFs with visible bottom whitespace trigger densify a bit more often.
+    resume_underfull_mean_threshold: float = Field(default=233.0, ge=210.0, le=252.0)
     resume_underfull_dpi: int = Field(default=100, ge=72, le=150)
     # Optional: run scripts/measure_pdf_bottom_mean.py on your Overleaf "full 1 page" PDF, paste value here.
     # When set, underfull = measured_mean > golden_mean + golden_margin (absolute threshold ignored).
     resume_underfull_golden_mean: float | None = Field(default=None)
     resume_underfull_golden_margin: float = Field(default=12.0, ge=0.5, le=80.0)
+
+    # After 1-page PDF succeeds: pdftotext/pypdf smoke test; auto-fix via LLM up to N times (0 = off).
+    resume_ats_fix_max: int = Field(default=2, ge=0, le=4)
+    # Optional post-pass: checker LLM returns issues JSON only (extra API cost).
+    resume_quality_checker: bool = Field(default=False)
+
+    # True: model returns resume_data + preview + coaching; server builds LaTeX deterministically.
+    resume_structured_latex: bool = Field(default=False)
+    # Structured mode: LLM retries after SCHEMA_ERROR (0 = fail immediately on invalid resume_data).
+    resume_schema_heal_max: int = Field(default=2, ge=0, le=8)
 
     # env는 위에서 load_dotenv로만 주입 (cwd/이중 로드 이슈 방지)
     model_config = SettingsConfigDict(extra="ignore")
@@ -83,14 +122,6 @@ class Settings(BaseSettings):
             return v.strip()
         return v
 
-    @model_validator(mode="after")
-    def empty_image_disables_docker_only(self):
-        """빈 이미지면 Docker-only를 끄지 않으면 PDF가 영원히 불가능해짐."""
-        if not self.latex_docker_image.strip():
-            return self.model_copy(update={"latex_docker_only": False})
-        return self
-
-
 settings = Settings()
 
 # compile_pdf.py 는 os.environ 만 읽음 — Settings 와 동기화
@@ -100,14 +131,8 @@ else:
     os.environ.pop("LATEX_DOCKER_IMAGE", None)
 if settings.latex_docker_network.strip():
     os.environ["LATEX_DOCKER_NETWORK"] = settings.latex_docker_network.strip()
-if settings.latex_docker_only:
-    os.environ["LATEX_DOCKER_ONLY"] = "1"
-else:
-    os.environ.pop("LATEX_DOCKER_ONLY", None)
-if settings.latex_docker_allow_fallback:
-    os.environ["LATEX_DOCKER_ALLOW_FALLBACK"] = "1"
-else:
-    os.environ.pop("LATEX_DOCKER_ALLOW_FALLBACK", None)
+os.environ.pop("LATEX_DOCKER_ONLY", None)
+os.environ.pop("LATEX_DOCKER_ALLOW_FALLBACK", None)
 if settings.latex_portable_preamble:
     os.environ["LATEX_PORTABLE_PREAMBLE"] = "1"
 else:
@@ -122,28 +147,31 @@ if not settings.openai_api_key:
 else:
     logger.info("OpenAI API key loaded (%d chars). Model: %s", len(settings.openai_api_key), settings.openai_model)
 
+if settings.resume_structured_latex:
+    logger.info(
+        "RESUME_STRUCTURED_LATEX: model outputs resume_data only; LaTeX is server-rendered "
+        "(schema self-heal max=%s).",
+        settings.resume_schema_heal_max,
+    )
+
 _has_docker_cli = bool(shutil.which("docker"))
 logger.info(
-    "PDF compile env: LATEX_DOCKER_IMAGE=%r | docker CLI=%s | LATEX_DOCKER_ONLY=%s | "
-    "LATEX_DOCKER_ALLOW_FALLBACK=%s | LATEX_DOCKER_NETWORK=%r",
+    "PDF compile: Docker-only | LATEX_DOCKER_IMAGE=%r | docker CLI=%s | LATEX_DOCKER_NETWORK=%r",
     settings.latex_docker_image or None,
-    "yes" if _has_docker_cli else "NO (host TeX would be used only if allowed)",
-    settings.latex_docker_only,
-    settings.latex_docker_allow_fallback,
+    "yes" if _has_docker_cli else "NO (PDF will fail until Docker is available)",
     settings.latex_docker_network,
 )
-if settings.latex_docker_image.strip() and not _has_docker_cli and not settings.latex_docker_allow_fallback:
+if settings.latex_docker_image.strip() and not _has_docker_cli:
     logger.warning(
-        "LATEX_DOCKER_IMAGE is set but `docker` is not in PATH — compiles will fail until Docker is available "
-        "or you set LATEX_DOCKER_ALLOW_FALLBACK=1 (TinyTeX/MacTeX)."
+        "LATEX_DOCKER_IMAGE is set but `docker` is not in PATH — PDF compile will fail. "
+        "Start Docker Desktop and ensure `docker` is on PATH."
     )
 
 _comp = compiler_available()
-if settings.latex_docker_only and settings.latex_docker_image.strip() and not _comp.get("latex_docker_ready"):
+if settings.latex_docker_image.strip() and not _comp.get("latex_docker_ready"):
     logger.warning(
-        "Overleaf-grade PDF: LATEX_DOCKER_ONLY=1 but Docker is not ready for %s. "
-        "From repo root run: docker compose build texlive — then ensure Docker Desktop is running. "
-        "Or set LATEX_DOCKER_ONLY=0 and LATEX_DOCKER_ALLOW_FALLBACK=1 for host TeX.",
+        "PDF requires Docker for %s. From repo root: docker compose build texlive — "
+        "then start Docker Desktop and restart the API.",
         settings.latex_docker_image,
     )
 
@@ -220,6 +248,10 @@ class GenerateResponse(BaseModel):
     """True if bottom of page looked empty (heuristic); None if density check skipped or unavailable."""
     density_expand_rounds: int = 0
     """How many LLM densify passes ran after PDF layout check."""
+    ats_issue_code: str | None = None
+    """Last ATS smoke-test issue code after pipeline; None if check passed or skipped."""
+    quality_issues: list[dict[str, Any]] | None = None
+    """Optional checker LLM output (issues only); None if disabled or failed."""
 
 
 def repair_json(text: str) -> dict[str, Any]:
@@ -230,18 +262,7 @@ def repair_json(text: str) -> dict[str, Any]:
     return json.loads(text)
 
 
-def _coerce_generate_response(data: dict[str, Any]) -> GenerateResponse:
-    """Validate model JSON and build GenerateResponse (normalized LaTeX)."""
-    latex = data.get("latex_document") or data.get("latex") or ""
-    if not latex or "\\documentclass" not in latex:
-        raise HTTPException(
-            status_code=502,
-            detail="Model did not return a valid latex_document.",
-        )
-    latex = sanitize_latex_for_overleaf(
-        sanitize_unicode_for_latex(normalize_to_dhruv_template(latex))
-    )
-
+def _parse_preview_coaching(data: dict[str, Any]) -> tuple[list[PreviewSection], list[CoachingSection]]:
     preview_raw = data.get("preview_sections") or []
     coaching_raw = data.get("coaching") or []
 
@@ -280,6 +301,21 @@ def _coerce_generate_response(data: dict[str, Any]) -> GenerateResponse:
             coaching[i].items.append(CoachingItem(why_better=""))
         coaching[i].items = coaching[i].items[: len(prev.bullets)]
 
+    return preview_sections, coaching
+
+
+def _coerce_latex_document_response(data: dict[str, Any]) -> GenerateResponse:
+    """Validate model JSON and build GenerateResponse (normalized LaTeX)."""
+    latex = data.get("latex_document") or data.get("latex") or ""
+    if not latex or "\\documentclass" not in latex:
+        raise HTTPException(
+            status_code=502,
+            detail="Model did not return a valid latex_document.",
+        )
+    latex = sanitize_latex_for_overleaf(
+        sanitize_unicode_for_latex(normalize_to_dhruv_template(latex))
+    )
+    preview_sections, coaching = _parse_preview_coaching(data)
     return GenerateResponse(
         latex_document=latex,
         preview_sections=preview_sections,
@@ -287,56 +323,189 @@ def _coerce_generate_response(data: dict[str, Any]) -> GenerateResponse:
     )
 
 
-def _revision_user_for_one_page(*, raw: str, latex: str, pages: int) -> str:
-    raw_cap = raw if len(raw) <= 28_000 else raw[:14_000] + "\n\n[...truncated...]\n\n" + raw[-14_000:]
-    return f"""The LaTeX resume below compiled to **{pages} pages**. It must fit **exactly ONE** U.S. letter page.
+def _coerce_structured_attempt(
+    data: dict[str, Any],
+) -> tuple[GenerateResponse, dict[str, Any]]:
+    """Single structured pass; raises ResumeSchemaError for LLM self-heal loop."""
+    rd_raw = data.get("resume_data")
+    if not isinstance(rd_raw, dict):
+        raise ResumeSchemaError(
+            ["- resume_data: must be a JSON object"],
+            data,
+        )
+    try:
+        rd = parse_resume_data(rd_raw)
+    except ValidationError as e:
+        raise ResumeSchemaError(format_resume_validation_errors(e), data) from e
+    try:
+        latex = build_latex_document(rd)
+    except ValueError as e:
+        raise ResumeSchemaError([f"- document: {e}"], data) from e
+    latex = sanitize_latex_for_overleaf(sanitize_unicode_for_latex(latex))
+    preview_sections, coaching = _parse_preview_coaching(data)
+    return (
+        GenerateResponse(
+            latex_document=latex,
+            preview_sections=preview_sections,
+            coaching=coaching,
+        ),
+        rd_raw,
+    )
 
-Return ONE JSON object with the same keys and schema as before: `latex_document`, `preview_sections`, `coaching`.
-Follow the SAME system rules (Dhruv template, preamble lock, JSON shape).
 
-**Tighten slightly — preserve ALL substantive facts from the ORIGINAL SOURCE.** Do not drop information to save space. That includes: **header contact** (phone, email, links as given), **Education** (schools, degrees, dates, honors, coursework, activities mentioned), **every employer / role / internship**, **every project or role-like block**, **Technical Skills** (every language/framework/tool named in the source should still appear somewhere in the three skill lines — abbreviate or cluster, do not delete a technology), certifications, awards, and other facts present in the source. You may **reword and compress** (same meaning, fewer words) and **merge** two short bullets into one line if no fact is lost.
+def _llm_fix_resume_schema(
+    client: OpenAI,
+    fixer_sys: str,
+    model_response: dict[str, Any],
+    schema_errors: list[str],
+) -> dict[str, Any]:
+    user = revision_user_fix_schema(
+        model_response=model_response,
+        schema_errors=schema_errors,
+    )
+    completion = client.chat.completions.create(
+        model=settings.openai_model,
+        messages=[
+            {"role": "system", "content": fixer_sys},
+            {"role": "user", "content": user},
+        ],
+        response_format={"type": "json_object"},
+        temperature=0.15,
+        max_tokens=16_384,
+    )
+    raw = completion.choices[0].message.content or "{}"
+    return repair_json(raw)
 
-**Do not remove a whole** `\\resumeSubheading` **or** `\\resumeProjectHeading` **that reflects content in the source.** If the source mentions something the template has no section for, keep it as a bullet under the closest section rather than omitting it.
 
-**Order of edits (mild first, drastic last):**
-1. Shorten bullet **wording** only (same facts, fewer words); merge clauses; drop filler adjectives.
-2. **Merge** related bullets into a single `\\resumeItem` when both facts stay explicit — never merge in a way that hides an employer, date, or metric.
-3. Tighten **Technical Skills** with shorter phrasing or grouping; **every tech term from the source must remain visible** (abbreviations OK if unambiguous).
-4. Optional **small** negative `\\vspace` in the **document body only** (never change the required preamble).
-5. Only if still over one page after the above: remove **at most one** lowest-redundancy bullet from the **single longest** list — and only if its facts are already stated elsewhere; otherwise keep trimming wording. Prefer another wording pass over deleting.
-6. **Never** delete Education, a whole job, a whole project, or the skills block to fit the page.
+def _structured_coerce_pipeline(
+    client: OpenAI | None,
+    data: dict[str, Any],
+    fixer_sys: str,
+    log_en: list[str],
+    log_ko: list[str],
+) -> tuple[GenerateResponse, dict[str, Any]]:
+    work = data
+    max_h = settings.resume_schema_heal_max if client is not None else 0
+    for attempt in range(max_h + 1):
+        try:
+            return _coerce_structured_attempt(work)
+        except ResumeSchemaError as e:
+            if attempt >= max_h:
+                raise HTTPException(
+                    status_code=502,
+                    detail={
+                        "error": "resume_data_schema_failed",
+                        "schema_errors": e.errors,
+                    },
+                ) from None
+            log_en.append(
+                f"resume_data failed validation; schema self-heal ({attempt + 1}/{max_h})…"
+            )
+            log_ko.append(
+                f"스키마 검증 실패 — resume_data 자동 수정 중 ({attempt + 1}/{max_h})…"
+            )
+            work = _llm_fix_resume_schema(
+                client, fixer_sys, e.model_response, e.errors
+            )
+    raise AssertionError("structured coerce pipeline unreachable")
 
-Align `preview_sections` / `coaching` with the edited LaTeX.
 
---- ORIGINAL SOURCE (context) ---
-{raw_cap}
+def attempt_llm_latex_compile_fix(
+    client: OpenAI,
+    *,
+    tex_for_prompt: str,
+    err_snippet: str,
+) -> tuple[str | None, str | None]:
+    """
+    Single LLM call: REVISION_SIGNAL fix_compile_error with numbered source context.
+    Returns (normalized_tex_or_none, optional_reason).
+    """
+    user = revision_user_fix_compile(latex=tex_for_prompt, error_snippet=err_snippet)
+    completion = client.chat.completions.create(
+        model=settings.openai_model,
+        messages=[
+            {"role": "system", "content": fixer_compile_system()},
+            {"role": "user", "content": user},
+        ],
+        response_format={"type": "json_object"},
+        temperature=0.1,
+        max_tokens=16_384,
+    )
+    raw = completion.choices[0].message.content or "{}"
+    try:
+        data = repair_json(raw)
+    except json.JSONDecodeError:
+        logger.warning("compile heal: model returned invalid JSON")
+        return None, None
+    reason = data.get("reason") if isinstance(data.get("reason"), str) else None
+    latex_out = (data.get("latex_document") or data.get("latex") or "").strip()
+    if not latex_out or "\\documentclass" not in latex_out:
+        return None, reason
+    latex_out = sanitize_latex_for_overleaf(
+        sanitize_unicode_for_latex(normalize_to_dhruv_template(latex_out))
+    )
+    return latex_out, reason
 
---- CURRENT latex_document (slightly too long; replace entirely in your output) ---
-{latex}
-"""
+
+def _inject_preview_coaching_from_previous(
+    data: dict[str, Any],
+    prev: GenerateResponse | None,
+) -> None:
+    """Compile-fix JSON may omit UI fields; keep preview/coaching from the last response."""
+    if prev is None:
+        return
+    ps = data.get("preview_sections")
+    ch = data.get("coaching")
+    if not ps:
+        data["preview_sections"] = [p.model_dump() for p in prev.preview_sections]
+    if not ch:
+        data["coaching"] = [c.model_dump() for c in prev.coaching]
 
 
-def _revision_user_expand_density(*, raw: str, latex: str) -> str:
-    raw_cap = raw if len(raw) <= 28_000 else raw[:14_000] + "\n\n[...truncated...]\n\n" + raw[-14_000:]
-    return f"""The LaTeX resume compiles to **exactly ONE** U.S. letter page, but the **rendered PDF has too much empty space at the bottom** (underfull layout). Recruiters expect the page to be **well-filled** (~90-98%% vertical use of the body) when the source material supports it.
+def _coerce_any_response(
+    data: dict[str, Any],
+    *,
+    client: OpenAI | None = None,
+    fixer_sys: str = "",
+    log_en: list[str] | None = None,
+    log_ko: list[str] | None = None,
+) -> tuple[GenerateResponse, dict[str, Any] | None]:
+    if not settings.resume_structured_latex:
+        return _coerce_latex_document_response(data), None
+    fs = fixer_sys.strip() or structured_fixer_system()
+    le, lk = log_en or [], log_ko or []
+    return _structured_coerce_pipeline(client, data, fs, le, lk)
 
-Return ONE JSON object with the same keys and schema as before: `latex_document`, `preview_sections`, `coaching`.
-Follow the SAME system rules (Dhruv template, preamble lock, JSON shape).
 
-**Densify using ONLY facts from the original source** — and **do not remove** any fact already in the current LaTeX (no invented employers, dates, or metrics):
-1. Add **1-2 more** `\\resumeItem` bullets per Experience where the source still has unused details (hard cap **5** bullets per role).
-2. Add or **expand** a Project block if the source lists projects not fully used.
-3. **Expand** Technical Skills (Languages / Frameworks / Tools) with more comma-separated items from the source; keep everything already listed.
-4. Prefer **one line per bullet**; if needed for metrics, up to **two lines**, target roughly **90-110 characters per line** where possible.
-5. Priority: **Experience first**, then Projects, then Skills. Do **not** add a new section type that breaks the template.
-6. The result must still compile to **one page**. You may use **small** negative `\\vspace` in the **document body only** (never change the required preamble).
+def _coerce_generate_response(data: dict[str, Any]) -> GenerateResponse:
+    """Backward-compatible: LaTeX or structured → GenerateResponse (drops resume_data blob)."""
+    r, _ = _coerce_any_response(data)
+    return r
 
---- ORIGINAL SOURCE (context) ---
-{raw_cap}
 
---- CURRENT latex_document (too sparse at bottom; replace entirely in your output) ---
-{latex}
-"""
+def _run_checker_llm(
+    client: OpenAI, checker_sys: str, latex: str
+) -> list[dict[str, Any]] | None:
+    """Diagnostic-only checker; returns issues list or None on failure."""
+    try:
+        completion = client.chat.completions.create(
+            model=settings.openai_model,
+            messages=[
+                {"role": "system", "content": checker_sys},
+                {"role": "user", "content": build_checker_user(latex=latex)},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.15,
+            max_tokens=4096,
+        )
+        raw = completion.choices[0].message.content or "{}"
+        data = repair_json(raw)
+        issues = data.get("issues")
+        if isinstance(issues, list):
+            return [x for x in issues if isinstance(x, dict)]
+    except Exception as e:
+        logger.warning("Checker LLM failed: %s", e)
+    return None
 
 
 def _append_one_page_done_notes(
@@ -394,14 +563,35 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
         raw = raw[:120_000] + "\n\n[truncated]"
 
     client = OpenAI(api_key=settings.openai_api_key)
-    system = build_system_prompt()
-    user_msg = f"--- RESUME SOURCE ---\n\n{raw}"
+    structured = settings.resume_structured_latex
+    generator_sys = (
+        structured_generator_system() if structured else generator_system()
+    )
+    fixer_sys = structured_fixer_system() if structured else fixer_system()
+    compile_fixer_sys = (
+        structured_fixer_compile_system() if structured else fixer_compile_system()
+    )
+    densify_sys = (
+        structured_densify_system() if structured else densify_system()
+    )
+    checker_sys = checker_system()
+    user_msg = (
+        build_structured_generation_user_message(raw)
+        if structured
+        else build_generation_user_message(raw)
+    )
+    user_msg += (
+        "\n=== SERVER PIPELINE NOTE ===\n"
+        "First pass: **maximize** grounded detail from RESUME SOURCE—**100%** of metrics/tech names/scope must stay in the output (rephrase OK, omit never). "
+        "Experience **4–5** sentence-level bullets per role when material exists; mix **1- and 2-line** depth. "
+        "If PDF >1 page, server asks for **fit_one_page**: remove filler words only—**not** facts—then densify may refill bottom whitespace from existing facts.\n"
+    )
     if settings.resume_density_expand_max > 0:
         user_msg += (
-            "\n\n[Server pipeline] First pass: include **all** facts from the source (education, every job, projects, skills, contact). "
-            "Use as many bullets per role as the source supports (typically 2-5). The server compiles to PDF, then may ask you to "
-            "**densify** from the **same** source if the page looks underfull, or **tighten wording** (not drop facts) if over one page.\n"
+            "If the PDF is one page but the bottom looks empty, the server may **densify** (more detail from existing facts only).\n"
         )
+    if structured:
+        user_msg += "Structured mode: revisions adjust **resume_data** JSON only; never output LaTeX.\n"
 
     log_ko: list[str] = []
     log_en: list[str] = []
@@ -414,7 +604,7 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
         completion = client.chat.completions.create(
             model=settings.openai_model,
             messages=[
-                {"role": "system", "content": system},
+                {"role": "system", "content": generator_sys},
                 {"role": "user", "content": user_msg},
             ],
             response_format={"type": "json_object"},
@@ -435,7 +625,13 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
             detail="Model returned invalid JSON. Retry or shorten input.",
         ) from e
 
-    resp = _coerce_generate_response(data)
+    resp, resume_data_state = _coerce_any_response(
+        data,
+        client=client,
+        fixer_sys=fixer_sys,
+        log_en=log_en,
+        log_ko=log_ko,
+    )
     latex = resp.latex_document
 
     log_en.append("Draft ready; applying checks…")
@@ -446,7 +642,78 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
         log_en.append("Multiple pages allowed — skipping strict 1-page enforcement.")
         log_ko.append("여러 페이지 허용 모드입니다. 1페이지 강제를 적용하지 않습니다.")
         yield _progress_event(log_ko, log_en)
-        pdf, _err = compile_latex_to_pdf(latex)
+        pdf, err_detail = compile_latex_to_pdf(latex)
+        am_compile_budget = 2
+        if not pdf:
+            err_snippet = (
+                json.dumps(err_detail, ensure_ascii=False) if err_detail else ""
+            )
+            while not pdf and am_compile_budget > 0:
+                am_compile_budget -= 1
+                log_en.append(
+                    f"PDF compile failed; asking model to fix LaTeX "
+                    f"({2 - am_compile_budget}/2)…"
+                )
+                log_ko.append(
+                    "PDF 컴파일 실패 — 모델에 LaTeX 오류 수정을 요청합니다… "
+                    f"({2 - am_compile_budget}/2)"
+                )
+                yield _progress_event(log_ko, log_en)
+                rev_user = (
+                    revision_user_fix_compile_structured(
+                        resume_data=resume_data_state,
+                        error_snippet=err_snippet,
+                        rendered_latex=latex,
+                    )
+                    if structured and resume_data_state is not None
+                    else revision_user_fix_compile(
+                        latex=latex, error_snippet=err_snippet
+                    )
+                )
+                try:
+                    completion = client.chat.completions.create(
+                        model=settings.openai_model,
+                        messages=[
+                            {"role": "system", "content": compile_fixer_sys},
+                            {"role": "user", "content": rev_user},
+                        ],
+                        response_format={"type": "json_object"},
+                        temperature=0.1,
+                        max_tokens=16_384,
+                    )
+                except Exception as e:
+                    logger.exception("OpenAI compile-fix error (allow_multi)")
+                    raise HTTPException(status_code=502, detail=str(e)) from e
+                rev_content = completion.choices[0].message.content or "{}"
+                try:
+                    data = repair_json(rev_content)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "Compile-fix JSON parse failed (allow_multi): %s",
+                        rev_content[:500],
+                    )
+                    break
+                reason = data.get("reason")
+                if isinstance(reason, str) and reason.strip():
+                    log_en.append(f"Compile-fix note: {reason.strip()[:500]}")
+                    log_ko.append(f"컴파일 수정: {reason.strip()[:500]}")
+                _inject_preview_coaching_from_previous(data, resp)
+                resp, blob = _coerce_any_response(
+                    data,
+                    client=client,
+                    fixer_sys=fixer_sys,
+                    log_en=log_en,
+                    log_ko=log_ko,
+                )
+                if blob is not None:
+                    resume_data_state = blob
+                latex = resp.latex_document
+                pdf, err_detail = compile_latex_to_pdf(latex)
+                err_snippet = (
+                    json.dumps(err_detail, ensure_ascii=False)
+                    if err_detail
+                    else ""
+                )
         pc = _count_pdf_pages(pdf) if pdf else None
         if not pdf:
             log_en.append("Server PDF compile failed; page count unknown.")
@@ -455,6 +722,17 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
             log_en.append(f"Server PDF: {pc} page(s).")
             log_ko.append(f"서버 PDF 기준 {pc}페이지입니다.")
         yield _progress_event(log_ko, log_en)
+        ats_ic = ats_smoke_test(pdf) if pdf else None
+        if ats_ic:
+            log_en.append(f"ATS smoke (informational): {ats_ic}")
+            log_ko.append(f"ATS 스모크(참고): {ats_ic}")
+            yield _progress_event(log_ko, log_en)
+        q_issues: list[dict[str, Any]] | None = None
+        if pdf and settings.resume_quality_checker:
+            log_en.append("Running quality checker (diagnostic only)…")
+            log_ko.append("품질 점검(진단만)을 실행합니다…")
+            yield _progress_event(log_ko, log_en)
+            q_issues = _run_checker_llm(client, checker_sys, latex)
         final = resp.model_copy(
             update={
                 "pdf_page_count": pc,
@@ -464,6 +742,8 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                 "revision_log_ko": list(log_ko),
                 "pdf_layout_underfull": None,
                 "density_expand_rounds": 0,
+                "ats_issue_code": ats_ic,
+                "quality_issues": q_issues,
             }
         )
         yield {"type": "result", "data": final.model_dump()}
@@ -491,12 +771,15 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
     expand_left = settings.resume_density_expand_max
     density_rounds = 0
     density_max = settings.resume_density_expand_max
+    compile_fix_budget = 2
 
     def _finish_fields(
         *,
         pdf_page_count: int | None,
         one_page_enforced: bool,
         layout_underfull: bool | None,
+        ats_issue_code: str | None = None,
+        quality_issues: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         return {
             "pdf_page_count": pdf_page_count,
@@ -506,6 +789,8 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
             "revision_log_ko": list(log_ko),
             "pdf_layout_underfull": layout_underfull,
             "density_expand_rounds": density_rounds,
+            "ats_issue_code": ats_issue_code,
+            "quality_issues": quality_issues,
         }
 
     while True:
@@ -516,6 +801,80 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
 
             pdf, err_detail = compile_latex_to_pdf(latex)
             if not pdf:
+                err_snippet = (
+                    json.dumps(err_detail, ensure_ascii=False)
+                    if err_detail
+                    else ""
+                )
+                while not pdf and compile_fix_budget > 0:
+                    compile_fix_budget -= 1
+                    log_en.append(
+                        f"PDF compile failed; asking model to fix LaTeX (compile-fix "
+                        f"{2 - compile_fix_budget}/2)…"
+                    )
+                    log_ko.append(
+                        "PDF 컴파일 실패 — 모델에 LaTeX 오류 수정을 요청합니다… "
+                        f"({2 - compile_fix_budget}/2)"
+                    )
+                    yield _progress_event(log_ko, log_en)
+                    rev_user = (
+                        revision_user_fix_compile_structured(
+                            resume_data=resume_data_state,
+                            error_snippet=err_snippet,
+                            rendered_latex=latex,
+                        )
+                        if structured and resume_data_state is not None
+                        else revision_user_fix_compile(
+                            latex=latex, error_snippet=err_snippet
+                        )
+                    )
+                    try:
+                        completion = client.chat.completions.create(
+                            model=settings.openai_model,
+                            messages=[
+                                {"role": "system", "content": compile_fixer_sys},
+                                {"role": "user", "content": rev_user},
+                            ],
+                            response_format={"type": "json_object"},
+                            temperature=0.1,
+                            max_tokens=16_384,
+                        )
+                    except Exception as e:
+                        logger.exception("OpenAI compile-fix error")
+                        raise HTTPException(status_code=502, detail=str(e)) from e
+
+                    rev_content = completion.choices[0].message.content or "{}"
+                    try:
+                        data = repair_json(rev_content)
+                    except json.JSONDecodeError:
+                        logger.warning(
+                            "Compile-fix JSON parse failed: %s", rev_content[:500]
+                        )
+                        break
+
+                    reason = data.get("reason")
+                    if isinstance(reason, str) and reason.strip():
+                        log_en.append(f"Compile-fix note: {reason.strip()[:500]}")
+                        log_ko.append(f"컴파일 수정: {reason.strip()[:500]}")
+                    _inject_preview_coaching_from_previous(data, resp)
+                    resp, blob = _coerce_any_response(
+                        data,
+                        client=client,
+                        fixer_sys=fixer_sys,
+                        log_en=log_en,
+                        log_ko=log_ko,
+                    )
+                    if blob is not None:
+                        resume_data_state = blob
+                    latex = resp.latex_document
+                    pdf, err_detail = compile_latex_to_pdf(latex)
+                    err_snippet = (
+                        json.dumps(err_detail, ensure_ascii=False)
+                        if err_detail
+                        else ""
+                    )
+
+            if not pdf:
                 logger.warning(
                     "One-page check: compile failed (attempt %s), skipping enforcement: %s",
                     attempt,
@@ -524,7 +883,13 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                 log_en.append("PDF compile failed on server; cannot verify or enforce 1 page.")
                 log_ko.append("서버 PDF 컴파일 실패 — 1페이지 여부를 확인·강제할 수 없습니다.")
                 yield _progress_event(log_ko, log_en)
-                final = resp.model_copy(update=_finish_fields(pdf_page_count=None, one_page_enforced=False, layout_underfull=None))
+                final = resp.model_copy(
+                    update=_finish_fields(
+                        pdf_page_count=None,
+                        one_page_enforced=False,
+                        layout_underfull=None,
+                    )
+                )
                 yield {"type": "result", "data": final.model_dump()}
                 return
 
@@ -561,12 +926,18 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                 log_ko.append("모델에 문장·여백 위주로 살짝 줄이기를 요청합니다 (원본 정보 삭제·누락 지양)…")
                 yield _progress_event(log_ko, log_en)
 
-                rev_user = _revision_user_for_one_page(raw=raw, latex=latex, pages=pages)
+                rev_user = (
+                    revision_user_fit_one_page_structured(
+                        resume_data=resume_data_state, pages=pages
+                    )
+                    if structured and resume_data_state is not None
+                    else revision_user_one_page(latex=latex, pages=pages)
+                )
                 try:
                     completion = client.chat.completions.create(
                         model=settings.openai_model,
                         messages=[
-                            {"role": "system", "content": system},
+                            {"role": "system", "content": fixer_sys},
                             {"role": "user", "content": rev_user},
                         ],
                         response_format={"type": "json_object"},
@@ -587,7 +958,15 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                         detail="Model returned invalid JSON on one-page revision. Retry.",
                     ) from e
 
-                resp = _coerce_generate_response(data)
+                resp, blob = _coerce_any_response(
+                    data,
+                    client=client,
+                    fixer_sys=fixer_sys,
+                    log_en=log_en,
+                    log_ko=log_ko,
+                )
+                if blob is not None:
+                    resume_data_state = blob
                 latex = resp.latex_document
                 continue
 
@@ -633,6 +1012,133 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                     yield _progress_event(log_ko, log_en)
 
             if layout_underfull is not True:
+                ats_issue_code = ats_smoke_test(pdf)
+                if ats_issue_code and not should_autofix_ats(ats_issue_code):
+                    log_en.append(
+                        f"ATS smoke: {ats_issue_code} (no auto-fix for this code)."
+                    )
+                    log_ko.append(f"ATS 스모크: {ats_issue_code} (이 코드는 자동 수정 안 함).")
+                    yield _progress_event(log_ko, log_en)
+                if (
+                    settings.resume_ats_fix_max > 0
+                    and should_autofix_ats(ats_issue_code)
+                ):
+                    if structured and resume_data_state is None:
+                        log_en.append(
+                            "ATS auto-fix skipped: missing structured resume_data state."
+                        )
+                        log_ko.append(
+                            "ATS 자동 수정 생략: 구조화 resume_data 상태가 없습니다."
+                        )
+                        yield _progress_event(log_ko, log_en)
+                    else:
+                        ats_left = settings.resume_ats_fix_max
+                        latex_snap, pdf_snap, resp_snap = latex, pdf, resp
+                        cur_issue = ats_issue_code
+                        fix_idx = 0
+                        while cur_issue and ats_left > 0:
+                            ats_left -= 1
+                            fix_idx += 1
+                            mode = "JSON" if structured else "LaTeX"
+                            log_en.append(
+                                f"ATS auto-fix ({mode}) ({fix_idx}/{settings.resume_ats_fix_max}): "
+                                f"{cur_issue}…"
+                            )
+                            log_ko.append(
+                                f"ATS 자동 수정 ({mode}) ({fix_idx}/{settings.resume_ats_fix_max}): "
+                                f"{cur_issue}…"
+                            )
+                            yield _progress_event(log_ko, log_en)
+                            if structured:
+                                rev_user = revision_user_fix_ats_structured(
+                                    resume_data=resume_data_state,
+                                    ats_issue=cur_issue,
+                                )
+                            else:
+                                rev_user = revision_user_fix_ats(
+                                    latex=latex, ats_issue=cur_issue
+                                )
+                            try:
+                                completion = client.chat.completions.create(
+                                    model=settings.openai_model,
+                                    messages=[
+                                        {"role": "system", "content": fixer_sys},
+                                        {"role": "user", "content": rev_user},
+                                    ],
+                                    response_format={"type": "json_object"},
+                                    temperature=0.22,
+                                    max_tokens=16_384,
+                                )
+                            except Exception as e:
+                                logger.warning("ATS fix LLM error: %s", e)
+                                resp, latex, pdf = resp_snap, latex_snap, pdf_snap
+                                break
+
+                            rev_content = completion.choices[0].message.content or "{}"
+                            try:
+                                data = repair_json(rev_content)
+                            except json.JSONDecodeError:
+                                logger.warning(
+                                    "ATS fix JSON parse failed: %s", rev_content[:500]
+                                )
+                                resp, latex, pdf = resp_snap, latex_snap, pdf_snap
+                                break
+                            try:
+                                if structured:
+                                    resp_try, blob_try = _coerce_any_response(
+                                        data,
+                                        client=client,
+                                        fixer_sys=fixer_sys,
+                                        log_en=log_en,
+                                        log_ko=log_ko,
+                                    )
+                                    if blob_try is not None:
+                                        resume_data_state = blob_try
+                                else:
+                                    resp_try = _coerce_generate_response(data)
+                            except HTTPException:
+                                resp, latex, pdf = resp_snap, latex_snap, pdf_snap
+                                break
+                            latex_try = resp_try.latex_document
+                            pdf_try, _e2 = compile_latex_to_pdf(latex_try)
+                            if not pdf_try:
+                                resp, latex, pdf = resp_snap, latex_snap, pdf_snap
+                                break
+                            try:
+                                if _count_pdf_pages(pdf_try) != 1:
+                                    resp, latex, pdf = resp_snap, latex_snap, pdf_snap
+                                    break
+                            except Exception:
+                                resp, latex, pdf = resp_snap, latex_snap, pdf_snap
+                                break
+                            resp, latex, pdf = resp_try, latex_try, pdf_try
+                            latex_snap, pdf_snap, resp_snap = latex, pdf, resp
+                            cur_issue = ats_smoke_test(pdf)
+                            if cur_issue is None:
+                                break
+                            if not should_autofix_ats(cur_issue):
+                                log_en.append(
+                                    f"ATS after fix: {cur_issue} (stopping auto-fix)."
+                                )
+                                log_ko.append(
+                                    f"ATS 수정 후: {cur_issue} (자동 수정 중단)."
+                                )
+                                yield _progress_event(log_ko, log_en)
+                                break
+
+                ats_issue_code = ats_smoke_test(pdf)
+                q_issues: list[dict[str, Any]] | None = None
+                if settings.resume_quality_checker:
+                    log_en.append("Running quality checker (diagnostic only)…")
+                    log_ko.append("품질 점검(진단만)을 실행합니다…")
+                    yield _progress_event(log_ko, log_en)
+                    q_issues = _run_checker_llm(client, checker_sys, latex)
+
+                try:
+                    pages = _count_pdf_pages(pdf)
+                except Exception:
+                    pass
+
                 log_en.append(f"PDF fits on {pages} page(s). Done.")
                 log_ko.append(f"PDF는 {pages}페이지입니다. 완료되었습니다.")
                 yield _progress_event(log_ko, log_en)
@@ -651,6 +1157,8 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                         pdf_page_count=pages,
                         one_page_enforced=attempt > 0,
                         layout_underfull=layout_underfull,
+                        ats_issue_code=ats_issue_code,
+                        quality_issues=q_issues,
                     )
                 )
                 yield {"type": "result", "data": final.model_dump()}
@@ -670,11 +1178,17 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                 )
                 if len(log_en) > _n:
                     yield _progress_event(log_ko, log_en)
+                ats_ic = ats_smoke_test(pdf)
+                q_done: list[dict[str, Any]] | None = None
+                if settings.resume_quality_checker:
+                    q_done = _run_checker_llm(client, checker_sys, latex)
                 final = resp.model_copy(
                     update=_finish_fields(
                         pdf_page_count=pages,
                         one_page_enforced=attempt > 0,
                         layout_underfull=True,
+                        ats_issue_code=ats_ic,
+                        quality_issues=q_done,
                     )
                 )
                 yield {"type": "result", "data": final.model_dump()}
@@ -686,12 +1200,16 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
             log_ko.append(f"한 페이지를 꽉 채우도록 내용을 보강합니다… ({density_rounds}/{density_max}차)")
             yield _progress_event(log_ko, log_en)
 
-            rev_user = _revision_user_expand_density(raw=raw, latex=latex)
+            rev_user = (
+                revision_user_densify_structured(resume_data=resume_data_state)
+                if structured and resume_data_state is not None
+                else revision_user_densify(latex=latex)
+            )
             try:
                 completion = client.chat.completions.create(
                     model=settings.openai_model,
                     messages=[
-                        {"role": "system", "content": system},
+                        {"role": "system", "content": densify_sys},
                         {"role": "user", "content": rev_user},
                     ],
                     response_format={"type": "json_object"},
@@ -712,7 +1230,15 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                     detail="Model returned invalid JSON on density expand. Retry.",
                 ) from e
 
-            resp = _coerce_generate_response(data)
+            resp, blob = _coerce_any_response(
+                data,
+                client=client,
+                fixer_sys=fixer_sys,
+                log_en=log_en,
+                log_ko=log_ko,
+            )
+            if blob is not None:
+                resume_data_state = blob
             latex = resp.latex_document
             break
 
@@ -737,6 +1263,8 @@ def health():
         "ok": True,
         "openai_configured": bool(settings.openai_api_key),
         "model": settings.openai_model if settings.openai_api_key else None,
+        "resume_structured_latex": settings.resume_structured_latex,
+        "resume_schema_heal_max": settings.resume_schema_heal_max,
         "env_hint": str(_API_DIR / ".env"),
         "pdf_compile": comp.get("pdf_compile", comp.get("pdflatex") or comp.get("tectonic")),
         "compiler": comp,
@@ -895,6 +1423,9 @@ def generate_json_stream(body: GenerateJsonBody):
 
 class CompilePdfBody(BaseModel):
     latex_document: str
+    """If True (default), on compile failure call the compile-only LLM fixer up to 2× (needs OPENAI_API_KEY)."""
+
+    heal_with_llm: bool = True
 
 
 @app.post("/compile-pdf")
@@ -906,6 +1437,26 @@ def compile_pdf_endpoint(body: CompilePdfBody):
     pdf, err_detail = compile_latex_to_pdf(tex)
     if pdf:
         return Response(content=pdf, media_type="application/pdf")
+
+    if body.heal_with_llm and (settings.openai_api_key or "").strip():
+        err_snippet = json.dumps(err_detail, ensure_ascii=False) if err_detail else ""
+        client = OpenAI(api_key=settings.openai_api_key)
+        for attempt in range(2):
+            fixed, note = attempt_llm_latex_compile_fix(
+                client, tex_for_prompt=tex, err_snippet=err_snippet
+            )
+            if note:
+                logger.info(
+                    "compile-pdf LLM heal attempt %s: %s", attempt + 1, note[:400]
+                )
+            if not fixed:
+                break
+            tex = fixed
+            pdf, err_detail = compile_latex_to_pdf(tex)
+            if pdf:
+                return Response(content=pdf, media_type="application/pdf")
+            err_snippet = json.dumps(err_detail, ensure_ascii=False) if err_detail else ""
+
     raise HTTPException(status_code=422, detail=err_detail or {"code": "COMPILE_FAILED", "message": "Compile failed"})
 
 

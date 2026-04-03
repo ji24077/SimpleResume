@@ -59,7 +59,7 @@ cd web && npm run dev
 
 Open [http://localhost:3000](http://localhost:3000). LaTeX-only compile: [http://localhost:3000/latex](http://localhost:3000/latex).
 
-**Without Docker:** in `api/.env` set `LATEX_DOCKER_IMAGE=` (empty), `LATEX_DOCKER_ONLY=0`, `LATEX_DOCKER_ALLOW_FALLBACK=1`, then install full local TeX (not recommended — TinyTeX often misses `fullpage` etc.).
+**PDF requires Docker:** there is no host TeX fallback. Use `docker compose build texlive` and keep `LATEX_DOCKER_IMAGE=simpleresume-texlive:full` in `api/.env`.
 
 ## Flow
 
@@ -68,7 +68,7 @@ Open [http://localhost:3000](http://localhost:3000). LaTeX-only compile: [http:/
 3. Tabs: **Preview** · **Coaching** · **LaTeX**  
 4. **Download .tex** · **Download coaching (.md)**
 
-**PDF preview:** By default the API compiles **only** inside **Docker** (`latexmk` in `texlive/texlive:latest` — same idea as Overleaf). No Docker → set env opt-out (see Run) or PDF compile stays unavailable until `latex_docker_ready` is true.
+**PDF preview:** The API compiles **only** inside **Docker** (`latexmk` in the `simpleresume-texlive:full` image). Without Docker / image / `docker` CLI, PDF compile fails until `compiler.latex_docker_ready` is true.
 
 Check `GET http://127.0.0.1:8000/health` → `pdf_compile`, `compiler.latex_docker_ready`.
 
@@ -84,10 +84,9 @@ Check `GET http://127.0.0.1:8000/health` → `pdf_compile`, `compiler.latex_dock
 | `OPENAI_API_KEY` | `api/.env` | OpenAI (required) |
 | `OPENAI_MODEL` | `api/.env` | Default `gpt-4o`; optional `gpt-4o-mini` |
 | `API_BACKEND_URL` | `web/.env.local` | FastAPI URL for proxy |
-| `LATEX_DOCKER_IMAGE` | `api/.env` | Default `simpleresume-texlive:full`; empty = no Docker image |
-| `LATEX_DOCKER_ONLY` | `api/.env` | Default `1` — host TinyTeX/MacTeX not used unless fallback |
-| `LATEX_DOCKER_ALLOW_FALLBACK` | `api/.env` | `1` = if Docker fails, try host `latexmk` / `tectonic` |
+| `LATEX_DOCKER_IMAGE` | `api/.env` | Required for PDF: `simpleresume-texlive:full` (after `docker compose build texlive`) |
 | `LATEX_DOCKER_NETWORK` | `api/.env` | Default `none`; `bridge` if packages must fetch at compile time |
+| `LATEX_PORTABLE_PREAMBLE` | `api/.env` | Optional `1` — preamble retry variant inside Docker |
 
 ---
 
