@@ -41,7 +41,7 @@
 |------|------|
 | 하단 밝기 측정 | `compile_pdf.pdf_bottom_strip_mean_luminance` (`pdftoppm` + Pillow) |
 | underfull 판정 | `main.py` — 골든: `mean > GOLDEN_MEAN + MARGIN`, 절대: `mean >= THRESHOLD` |
-| 확장 LLM | `prompts.revision_user_densify` |
+| 확장 LLM | `features.generation.prompts.revision_user_densify` (import 경로는 `prompts` shim 가능) |
 | 운영 체크 | `api/OPS_CHECKLIST.md`, `/health` → `pdf_density_check_ready` |
 
 **엣지케이스**
@@ -52,7 +52,7 @@
 
 ---
 
-## 4. LaTeX 정리 · 컴파일 안정성 (`compile_pdf.py`)
+## 4. LaTeX 정리 · 컴파일 안정성 (`api/features/pdf_rendering/compile_pdf.py`)
 
 다음은 **컴파일/미리보기 직전**에 적용됨 (`sanitize_latex_for_overleaf`, `sanitize_unicode_for_latex`, `normalize_to_dhruv_template`).
 
@@ -77,7 +77,7 @@
 
 **건드리면 안 되는 것(주의)**
 
-- `normalize_to_dhruv_template` / `dhruv_preamble.tex` — 템플릿·매크로와 user 메시지 `=== TEMPLATE ===`(동일 파일 내용)이 **한 세트**. 한쪽만 바꾸면 모델 출력과 불일치.
+- `normalize_to_dhruv_template` / `api/features/pdf_rendering/dhruv_preamble.tex` — 템플릿·매크로와 user 메시지 `=== TEMPLATE ===`(동일 파일 내용)이 **한 세트**. 한쪽만 바꾸면 모델 출력과 불일치.
 - `compile_latex_to_pdf` 내부 **variant 순서**(`portable_first`) — Docker vs 호스트 TeX 실패 시 재시도 순서.
 
 ---
@@ -116,8 +116,10 @@
 
 ```
 api/main.py          — 라우트, iterate_generate_progress, 연락처, 설정 동기화
-api/prompts.py       — 짧은 `SYSTEM_PROMPT_CORE` + user에 `TEMPLATE`/`POLICIES`/`OUTPUT`/`RESUME SOURCE`; 리비전은 `revision_user_one_page` / `revision_user_densify` (신호+현재 LaTeX)
-api/compile_pdf.py   — 컴파일, sanitize, 측정, portable preamble
+api/features/generation/prompts.py — 프롬프트(루트 `api/prompts.py`는 shim)
+api/features/pdf_rendering/compile_pdf.py — 컴파일, sanitize, 측정, portable preamble (루트 `api/compile_pdf.py`는 shim)
+api/features/generation/structured_resume.py — structured → LaTeX (루트 `api/structured_resume.py`는 shim)
+api/features/resume_pipeline/ — lint/compile/pages/ATS 게이트
 api/OPS_CHECKLIST.md — 운영 체크리스트
 api/scripts/measure_pdf_bottom_mean.py — 골든 PDF 밝기 측정
 web/src/app/page.tsx

@@ -9,10 +9,10 @@ alwaysApply: true
 
 ## 1. PDF / LaTeX 렌더링 로직
 
-- `api/compile_pdf.py` (Docker `latexmk`, 엔진 순서, 변형·sanitize, `tex_assets` 복사)
+- `api/features/pdf_rendering/compile_pdf.py` (Docker `latexmk`, 엔진 순서, 변형·sanitize, `tex_assets` 복사); 루트 `api/compile_pdf.py`는 이 모듈로 연결되는 얇은 shim
 - `docker/texlive-full/Dockerfile`, `docker-compose.yml` (TeX Live 이미지)
 - FastAPI의 `LATEX_DOCKER_*` 동기화·기본값·`/compile`·`/compile-pdf`와 이들이 의존하는 compile 경로 (`api/main.py` 중 위 설정과 직결된 부분)
-- `api/dhruv_preamble.tex` — Generate 템플릿과 컴파일 일치용; 임의 변경 시 AI 출력·프롬프트와 어긋남
+- `api/features/pdf_rendering/dhruv_preamble.tex` — Generate 템플릿과 컴파일 일치용; 임의 변경 시 AI 출력·프롬프트와 어긋남
 - 웹: `web/src/app/latex/page.tsx`, `web/src/app/api/compile/route.ts`, `web/src/app/api/compile-pdf/route.ts` — PDF 미리보기·프록시 동선
 
 **허용:** 사용자가 “렌더링 고쳐줘”, “Docker 설정 바꿔줘”처럼 **구체 요청**한 작업만.

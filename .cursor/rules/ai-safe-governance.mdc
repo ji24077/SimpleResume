@@ -1,0 +1,30 @@
+---
+description: AI-safe governance — additive features, protected core, feature flags, extensions
+alwaysApply: true
+---
+
+# AI-Safe Development (SimpleResume)
+
+## Mandatory mindset (paste at top of big requests if helpful)
+
+```
+------------------------------------------------------------
+DO NOT MODIFY existing core logic (see .github/core-protected-paths.txt).
+DO NOT refactor unrelated files.
+DO NOT change public API contracts except additive optional fields.
+Only ADD new files or optional fields. Preserve backward compatibility.
+------------------------------------------------------------
+```
+
+## Rules
+
+1. **Branches:** Prefer `feature/*` for new work; do not assume direct push to `main`.
+2. **Core:** Do not edit files listed in `.github/core-protected-paths.txt` unless the user explicitly requests that path and accepts CI / review. If core change is required, **propose** instead of silently refactoring.
+3. **Layout:** Product pipeline code lives under `api/features/` (`pdf_rendering`, `generation`, `resume_pipeline`). Prefer new **optional** add-ons under `extensions/` (see `extensions/README.md`). Core must not import `extensions`.
+4. **Feature flags:** New user-facing behavior should be gated by `FEATURE_*` env vars (default false). See `api/.env.example` and `Settings` in `api/main.py`.
+5. **API:** Only **add** optional response fields; do not rename/remove/change types of existing fields without explicit user approval and schema/version bump.
+6. **Edits:** Smallest diff; no whole-file rewrites or repo-wide “cleanup” without explicit ask.
+
+## PDF / LaTeX
+
+PDF rendering and LaTeX generation share pipeline code; splitting into separate branches is not always possible—keep changes scoped and documented. See `docs/AI_GOVERNANCE.md`.

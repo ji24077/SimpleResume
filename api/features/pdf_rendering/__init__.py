@@ -1,6 +1,6 @@
-"""Shim: implementation in ``features.pdf_rendering.compile_pdf`` (stable import path ``compile_pdf``)."""
+"""PDF rendering: compile LaTeX to PDF (Docker / latexmk)."""
 
-from features.pdf_rendering.compile_pdf import (
+from .compile_pdf import (
     compile_latex_to_pdf,
     compiler_available,
     count_pdf_pages_from_bytes,

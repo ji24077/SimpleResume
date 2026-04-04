@@ -1,7 +1,7 @@
 """
 Generator LLM (first pass).
 
-**Live implementation:** ``api/main.py`` ``iterate_generate_progress`` + ``api/prompts.py``
+**Live implementation:** ``api/main.py`` ``iterate_generate_progress`` + ``api/features/generation/prompts.py``
 (``generator_system``, ``build_generation_user_message``).
 
 This module is a placeholder so the package layout matches the target architecture

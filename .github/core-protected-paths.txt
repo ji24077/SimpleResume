@@ -1,0 +1,5 @@
+# One path per line (repo-root relative). PRs touching these files fail CI unless label allow-core-change.
+# Lines starting with # are ignored.
+
+api/features/pdf_rendering/compile_pdf.py
+api/features/pdf_rendering/dhruv_preamble.tex

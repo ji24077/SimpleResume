@@ -53,7 +53,7 @@ from structured_resume import (
     format_resume_validation_errors,
     parse_resume_data,
 )
-from resume_pipeline.pipeline.ats_check import ats_smoke_test, should_autofix_ats
+from features.resume_pipeline.pipeline.ats_check import ats_smoke_test, should_autofix_ats
 
 # .env는 api/ 우선, 없으면 레포 루트 (cwd와 무관)
 _API_DIR = Path(__file__).resolve().parent
@@ -102,6 +102,10 @@ class Settings(BaseSettings):
     resume_structured_latex: bool = Field(default=False)
     # Structured mode: LLM retries after SCHEMA_ERROR (0 = fail immediately on invalid resume_data).
     resume_schema_heal_max: int = Field(default=2, ge=0, le=8)
+
+    # Governance (docs/AI_GOVERNANCE.md): new features default off; wire in feature PRs.
+    feature_pdf_annotations: bool = Field(default=False)
+    feature_advanced_diagnostics: bool = Field(default=False)
 
     # env는 위에서 load_dotenv로만 주입 (cwd/이중 로드 이슈 방지)
     model_config = SettingsConfigDict(extra="ignore")

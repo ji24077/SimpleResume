@@ -1,6 +1,6 @@
 """Resume build pipeline (machine gates + future LLM orchestration).
 
-HTTP and PDF rendering stay in ``api/main.py`` and ``api/compile_pdf.py``.
+HTTP stays in ``api/main.py``; PDF compile lives in ``api/features/pdf_rendering/`` (import also via ``compile_pdf`` shim).
 This package is additive: import it where you want explicit lint/signal checks.
 """
 

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "generate_response_v1.json",
+  "title": "Generate API response (v1, forward-compatible)",
+  "description": "Documented keys for /generate-style responses. additionalProperties allows optional new fields without breaking clients.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "latex_document": { "type": "string" },
+    "preview_sections": { "type": "array" },
+    "coaching": { "type": "array" },
+    "pdf_page_count": { "type": ["integer", "null"] },
+    "one_page_enforced": { "type": "boolean" },
+    "page_policy_applied": { "type": "string" },
+    "revision_log": { "type": "array", "items": { "type": "string" } },
+    "revision_log_ko": { "type": "array", "items": { "type": "string" } },
+    "pdf_layout_underfull": { "type": ["boolean", "null"] },
+    "density_expand_rounds": { "type": "integer" },
+    "ats_issue_code": { "type": ["string", "null"] },
+    "quality_issues": {
+      "type": ["array", "null"],
+      "items": { "type": "object", "additionalProperties": true }
+    }
+  }
+}

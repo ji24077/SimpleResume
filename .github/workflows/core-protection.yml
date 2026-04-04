@@ -1,0 +1,43 @@
+name: Core protection
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+jobs:
+  check-core-paths:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect allow-core-change label
+        id: bypass
+        run: |
+          if echo '${{ toJson(github.event.pull_request.labels) }}' | jq -e 'map(.name) | index("allow-core-change") != null' >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fail if protected paths changed
+        if: steps.bypass.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          git diff --name-only "$BASE" "$HEAD" | sort -u > /tmp/changed.txt
+          echo "Changed files:"
+          cat /tmp/changed.txt
+          hit=0
+          while IFS= read -r line || [ -n "$line" ]; do
+            [ -z "$line" ] && continue
+            case "$line" in \#*) continue ;; esac
+            rel=$(printf '%s' "$line" | tr -d '\r')
+            if grep -Fxq "$rel" /tmp/changed.txt; then
+              echo "::error::Protected path modified: $rel (add label allow-core-change to bypass, or split the PR)"
+              hit=1
+            fi
+          done < .github/core-protected-paths.txt
+          exit "$hit"
