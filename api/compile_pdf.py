@@ -316,6 +316,76 @@ def _fix_line_start_missing_backslash_resume_project_heading(tex: str) -> str:
     return re.sub(r"(?m)^(\s*)resumeProjectHeading\s*\{", r"\1\\resumeProjectHeading{", tex)
 
 
+def _skip_ws_tex_comments(s: str, start: int) -> int:
+    """Advance index past spaces/newlines and %-to-EOL comments."""
+    j = start
+    n = len(s)
+    while j < n:
+        if s[j] in " \t\r\n\v\f":
+            j += 1
+            continue
+        if s[j] == "%":
+            while j < n and s[j] != "\n":
+                j += 1
+            if j < n:
+                j += 1
+            continue
+        break
+    return j
+
+
+def _ensure_subheading_list_after_key_sections(tex: str) -> str:
+    r"""
+    Models sometimes emit ``\section{Education|Experience|Projects}`` then ``\resumeSubheading`` /
+    ``\resumeProjectHeading`` / ``\resumeItemListStart`` without ``\resumeSubHeadingListStart``.
+    The Dhruv macros require an outer ``itemize`` from ``\resumeSubHeadingListStart`` first.
+    """
+    pattern = re.compile(
+        r"\\section\s*\{\s*(Education|Experience|Projects)\s*\}\s*",
+        re.IGNORECASE,
+    )
+    out: list[str] = []
+    pos = 0
+    for m in pattern.finditer(tex):
+        out.append(tex[pos : m.end()])
+        pos = m.end()
+        j = _skip_ws_tex_comments(tex, pos)
+        rest = tex[j : j + 160].lstrip()
+        if rest.startswith(r"\resumeSubHeadingListStart"):
+            continue
+        if re.match(
+            r"\\resumeSubheading|\\resumeProjectHeading|\\resumeItemListStart",
+            rest,
+        ):
+            out.append("\\resumeSubHeadingListStart\n")
+    out.append(tex[pos:])
+    return "".join(out)
+
+
+def _fix_missing_item_before_resume_item_list(tex: str) -> str:
+    r"""
+    ``\resumeItemListStart`` expands to ``\begin{itemize}`` and must be nested inside a parent
+    ``\item`` (normally from ``\resumeSubheading`` / ``\resumeProjectHeading``). If the model
+    omits ``\resumeSubheading`` and puts ``\resumeItemListStart`` right after
+    ``\resumeSubHeadingListStart``, insert ``\item[]`` (empty label item) so the inner list is legal.
+    """
+    pat = re.compile(
+        r"(\\resumeSubHeadingListStart)((?:\s|%[^\n]*\n)*)(\\resumeItemListStart)",
+    )
+
+    def repl(mm: re.Match[str]) -> str:
+        mid = mm.group(2)
+        if r"\resumeSubheading" in mid or r"\resumeProjectHeading" in mid:
+            return mm.group(0)
+        return mm.group(1) + mid + r"\item[]" + "\n" + mm.group(3)
+
+    prev = None
+    while prev != tex:
+        prev = tex
+        tex = pat.sub(repl, tex)
+    return tex
+
+
 def _ensure_projects_subheading_list(tex: str) -> str:
     r"""
     ``\resumeProjectHeading`` expands to ``\item[]`` and must be inside ``\resumeSubHeadingListStart`` …
@@ -528,6 +598,10 @@ def sanitize_latex_for_overleaf(tex: str) -> str:
     - Line-start ``resumeProjectHeading{`` → ``\\resumeProjectHeading{``
     - ``\\textbf{...} | stack`` (literal placeholder) → drop ``| stack``
     - Technical Skills: ``} \\ `` before ``\\vspace`` / ``\\textbf`` → ``} \\\\`` newline
+    - ``\\section{Education|Experience|Projects}`` without ``\\resumeSubHeadingListStart`` before
+      subheading / project heading / item list → insert outer list
+    - ``\\resumeSubHeadingListStart`` then ``\\resumeItemListStart`` with no ``\\resumeSubheading``
+      between → insert ``\\item[]``
     """
     if not tex:
         return tex
@@ -537,6 +611,8 @@ def sanitize_latex_for_overleaf(tex: str) -> str:
     tex = _fix_line_start_missing_backslash_vspace(tex)
     tex = _fix_line_start_missing_backslash_resume_project_heading(tex)
     tex = _ensure_projects_subheading_list(tex)
+    tex = _ensure_subheading_list_after_key_sections(tex)
+    tex = _fix_missing_item_before_resume_item_list(tex)
     tex = _fix_lonely_resume_items_in_sublist(tex)
     tex = _wrap_bare_https_after_pipe(tex)
     tex = _fix_unclosed_center_before_first_section(tex)

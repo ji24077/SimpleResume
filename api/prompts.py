@@ -238,6 +238,8 @@ CRITICAL — LaTeX body shape (after the TEMPLATE marker line):
    Each \\resumeItem should carry **substance**: normally **one or two full sentences** worth of prose (natural line wrap), not a 5-word fragment—unless the source truly states only one atomic fact.
    (repeat subheading + item list for each job; fourth arg of \\resumeSubheading is always {} unless a city is required.)
 
+   **CRITICAL list nesting:** After ``\\section{Education}``, ``\\section{Experience}``, or ``\\section{Projects}`` you MUST have ``\\resumeSubHeadingListStart`` before the first ``\\resumeSubheading``, ``\\resumeProjectHeading``, or ``\\resumeItemListStart``. Never place ``\\resumeItemListStart`` directly after ``\\resumeSubHeadingListStart`` without a ``\\resumeSubheading`` or ``\\resumeProjectHeading`` line in between (pdfLaTeX often stops at ``\\resumeItemListStart`` with an interactive prompt).
+
 5) Projects (if any) — **CRITICAL (compile will fail if skipped):**
    \\resumeProjectHeading uses \\item[] internally, so it MUST sit inside \\resumeSubHeadingListStart … \\resumeSubHeadingListEnd
    (same outer wrapper as Education/Experience). Never put \\resumeProjectHeading directly under \\section{Projects} with no wrapper.
