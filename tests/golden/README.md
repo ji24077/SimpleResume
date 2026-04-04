@@ -1,15 +1,11 @@
-# Golden / regression inputs
+# Golden / regression tests
 
-Place stable sample resumes here for automated checks (e.g. fixed expected scores or API snapshot hashes).
+## Layout
 
-Suggested layout (team adds binaries as needed):
+- `fixtures/` — frozen inputs (e.g. `minimal_resume_data.json`).
+- `expected/` — expected hashes or snapshots (e.g. `structured_minimal_document_body.sha256`).
+- `test_regression_*.py` — pytest modules run via `pytest tests/golden` in CI.
 
-```
-tests/golden/
-  README.md
-  resume1.pdf
-  resume2.tex
-  resume3.png
-```
+## Policy
 
-**Policy:** Changing golden inputs or expected outputs should be intentional and reviewed. CI can later run `assert score_or_hash == expected` with documented tolerance only when approved.
+If a golden assertion fails after a **deliberate** change to preamble or deterministic body rendering, update the matching file under `expected/` in the **same PR** and note the reason in the PR description.

@@ -1,0 +1,23 @@
+{
+  "header": {
+    "name": "Golden User",
+    "email": "g@example.com",
+    "phone": "",
+    "links": []
+  },
+  "education": [],
+  "experience": [
+    {
+      "title": "Eng",
+      "company": "Acme",
+      "date": "2020",
+      "bullets": ["Did work"]
+    }
+  ],
+  "projects": [],
+  "skills": {
+    "languages": ["Python"],
+    "frameworks": [],
+    "tools": []
+  }
+}
