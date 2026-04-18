@@ -1,25 +1,30 @@
 # SimpleResume
 
-Upload a resume (PDF / .tex / text) → **Dhruv-style SWE LaTeX** + **preview** + **per-section coaching** (why it’s stronger) → download `.tex` and coaching `.md`.
+Upload a resume (PDF / .tex / text) → **Dhruv-style SWE LaTeX** + **preview** + **per-section coaching** (why it's stronger) → download `.tex` and coaching `.md`.
 
 Stack: **Next.js** (UI + API proxy) · **FastAPI** · **OpenAI API**
 
 ## Prerequisites
 
+- [uv](https://docs.astral.sh/uv/) (Python package manager)
 - Node 20+
 - Python 3.11+
 - OpenAI API key
 - **Docker Desktop** (PDF 미리보기 — Overleaf와 같은 TeX Live full + `latexmk`; 기본 설정이 Docker 전용)
 
-## Setup
+## Quick Start
+
+```bash
+make setup      # uv sync + npm install + docker build (all at once)
+```
+
+Or step by step:
 
 ### 1. API
 
 ```bash
 cd api
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+uv sync --dev
 cp .env.example .env
 # Edit .env: OPENAI_API_KEY=sk-...  (must live in api/.env — loaded from api folder path, not cwd)
 # Check: curl http://127.0.0.1:8000/health  → openai_configured: true
@@ -30,36 +35,44 @@ cp .env.example .env
 ```bash
 cd web
 npm install
-cp .env.example .env.local
-# Default API_BACKEND_URL=http://127.0.0.1:8000
+echo 'API_BACKEND_URL=http://127.0.0.1:8000' > .env.local
 ```
 
-## Run (two terminals)
+## Run
 
-**Once — TeX Docker image (Overleaf-grade compile)**
+**Easiest — both servers at once:**
 
 ```bash
-# repo root
-docker compose build texlive
+make dev        # API (port 8000) + Web (port 3000) concurrently; Ctrl-C stops both
 ```
 
-**Terminal A — API**
+**Or separately (two terminals):**
 
 ```bash
-cd api && source .venv/bin/activate && uvicorn main:app --reload --host 0.0.0.0 --port 8000
+# Once — TeX Docker image (Overleaf-grade compile)
+make docker-build
+
+# Terminal A — API
+make dev-api
+
+# Terminal B — Web
+make dev-web
 ```
 
 Startup logs should show `LATEX_DOCKER_IMAGE='simpleresume-texlive:full'` and Docker CLI `yes`. Check `GET http://127.0.0.1:8000/health` → `compiler.latex_docker_ready: true`.
 
-**Terminal B — Web**
-
-```bash
-cd web && npm run dev
-```
-
 Open [http://localhost:3000](http://localhost:3000). LaTeX-only compile: [http://localhost:3000/latex](http://localhost:3000/latex).
 
-**PDF requires Docker:** there is no host TeX fallback. Use `docker compose build texlive` and keep `LATEX_DOCKER_IMAGE=simpleresume-texlive:full` in `api/.env`.
+**PDF requires Docker:** there is no host TeX fallback. Use `make docker-build` and keep `LATEX_DOCKER_IMAGE=simpleresume-texlive:full` in `api/.env`.
+
+## Testing
+
+```bash
+make test         # all tests
+make test-unit    # fast, no Docker or LLM
+make test-integration
+make test-golden  # frozen-fixture regression tests
+```
 
 ## Flow
 
@@ -84,9 +97,13 @@ Check `GET http://127.0.0.1:8000/health` → `pdf_compile`, `compiler.latex_dock
 | `OPENAI_API_KEY` | `api/.env` | OpenAI (required) |
 | `OPENAI_MODEL` | `api/.env` | Default `gpt-4o`; optional `gpt-4o-mini` |
 | `API_BACKEND_URL` | `web/.env.local` | FastAPI URL for proxy |
-| `LATEX_DOCKER_IMAGE` | `api/.env` | Required for PDF: `simpleresume-texlive:full` (after `docker compose build texlive`) |
+| `LATEX_DOCKER_IMAGE` | `api/.env` | Required for PDF: `simpleresume-texlive:full` (after `make docker-build`) |
 | `LATEX_DOCKER_NETWORK` | `api/.env` | Default `none`; `bridge` if packages must fetch at compile time |
 | `LATEX_PORTABLE_PREAMBLE` | `api/.env` | Optional `1` — preamble retry variant inside Docker |
+
+## Make targets
+
+Run `make help` to list all available commands.
 
 ---
 

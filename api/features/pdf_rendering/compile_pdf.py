@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 
 _PREAMBLE_PATH = Path(__file__).resolve().parent / "dhruv_preamble.tex"
 _TEX_ASSETS_DIR = Path(__file__).resolve().parent / "tex_assets"
+
+# macOS /var/folders/ is not shared with Docker Desktop by default.
+# Place temp dirs under api/ so Docker volume mounts always work.
+_TEX_TMP_ROOT = Path(__file__).resolve().parent.parent.parent / ".tex_tmp"
 _ASSET_SUFFIXES = frozenset(
     {".tex", ".sty", ".cls", ".bib", ".bst", ".png", ".jpg", ".jpeg", ".pdf", ".eps"}
 )
@@ -790,7 +794,8 @@ def compile_latex_to_pdf(tex_source: str) -> tuple[bytes | None, dict[str, Any] 
         tex_source, portable_first=_should_use_portable_variant_order()
     )
 
-    with tempfile.TemporaryDirectory(prefix="sr_tex_") as tmp:
+    _TEX_TMP_ROOT.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="sr_tex_", dir=_TEX_TMP_ROOT) as tmp:
         out = Path(tmp)
         _copy_optional_tex_assets(out)
         tex_path = out / "resume.tex"

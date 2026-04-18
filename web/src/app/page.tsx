@@ -3,6 +3,10 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { GenerateResponse, PagePolicy } from "@/lib/types";
+import UploadForm from "@/components/UploadForm";
+import PdfPreview from "@/components/PdfPreview";
+import CoachingPanel from "@/components/CoachingPanel";
+import LatexViewer from "@/components/LatexViewer";
 
 type BackendHealth = {
   ok?: boolean;
@@ -171,7 +175,7 @@ export default function Home() {
         const { needEmail, needLinkedin } = pasteContactGaps(paste);
         if (needEmail && !contactEmail.trim()) {
           setError(
-            "원문에서 이메일이 잘 안 보입니다. 아래 ‘연락처’에 이메일을 입력하거나, 원문에 주소를 적어 주세요."
+            "원문에서 이메일이 잘 안 보입니다. 아래 '연락처'에 이메일을 입력하거나, 원문에 주소를 적어 주세요."
           );
           setLoading(false);
           return;
@@ -283,6 +287,17 @@ export default function Home() {
       setProgressMessage(null);
     }
   }, [file, paste, pagePolicy, contactEmail, contactLinkedin, contactPhone]);
+
+  const handleSetFile = useCallback((f: File | null) => {
+    setFile(f);
+    setError(null);
+  }, []);
+
+  const handleSetPaste = useCallback((v: string) => {
+    setPaste(v);
+    if (v) setFile(null);
+    setError(null);
+  }, []);
 
   const reset = () => {
     if (pdfUrl) URL.revokeObjectURL(pdfUrl);
@@ -449,121 +464,25 @@ export default function Home() {
             </section>
 
             <div ref={resumeBuilderRef} id="resume-builder" className="scroll-mt-6 space-y-8">
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-8">
-                <h2 className="mb-2 text-sm font-medium text-zinc-300">1. Upload or paste your draft</h2>
-                <p className="mb-6 text-sm text-zinc-500">
-                  PDF, .tex, or plain text. We extract content and regenerate an ATS-friendly, high-impact layout in
-                  LaTeX — ready to preview and download.
-                </p>
-                <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-zinc-700 bg-zinc-900 px-6 py-12 transition hover:border-emerald-600/50 hover:bg-zinc-800/50">
-                  <input
-                    type="file"
-                    accept=".pdf,.tex,.txt"
-                    className="hidden"
-                    onChange={(e) => {
-                      setFile(e.target.files?.[0] ?? null);
-                      setError(null);
-                    }}
-                  />
-                  <span className="text-sm text-zinc-400">
-                    {file ? file.name : "Drop file or click to choose"}
-                  </span>
-                </label>
-                <p className="mt-4 text-center text-xs text-zinc-600">or</p>
-                <textarea
-                  value={paste}
-                  onChange={(e) => {
-                    setPaste(e.target.value);
-                    if (e.target.value) setFile(null);
-                    setError(null);
-                  }}
-                  placeholder="Paste resume text here…"
-                  rows={10}
-                  className="mt-4 w-full resize-y rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
-                />
-                <div className="mt-6 space-y-3 rounded-xl border border-zinc-800 bg-zinc-950/50 px-4 py-4">
-                  <p className="text-xs font-medium text-zinc-400">연락처 (붙여넣기 시 권장)</p>
-                  <p className="text-xs text-zinc-500">
-                    원문에 이메일·LinkedIn이 분명하지 않으면 생성 전에 입력을 요청합니다. 파일 업로드(PDF 등)일 때는
-                    검사를 건너뜁니다.
-                  </p>
-                  <input
-                    type="email"
-                    autoComplete="email"
-                    placeholder="이메일 (예: you@school.edu)"
-                    value={contactEmail}
-                    onChange={(e) => setContactEmail(e.target.value)}
-                    className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
-                  />
-                  <input
-                    type="url"
-                    autoComplete="url"
-                    placeholder="LinkedIn (https://linkedin.com/in/…)"
-                    value={contactLinkedin}
-                    onChange={(e) => setContactLinkedin(e.target.value)}
-                    className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
-                  />
-                  <input
-                    type="tel"
-                    autoComplete="tel"
-                    placeholder="전화 (선택)"
-                    value={contactPhone}
-                    onChange={(e) => setContactPhone(e.target.value)}
-                    className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
-                  />
-                </div>
-                <div className="mt-6 space-y-3 rounded-xl border border-zinc-800 bg-zinc-950/50 px-4 py-4">
-                  <p className="text-xs font-medium text-zinc-400">페이지 정책</p>
-                  <label className="flex cursor-pointer items-start gap-3 text-sm text-zinc-300">
-                    <input
-                      type="radio"
-                      name="pagePolicy"
-                      checked={pagePolicy === "strict_one_page"}
-                      onChange={() => setPagePolicy("strict_one_page")}
-                      className="mt-1 accent-emerald-500"
-                    />
-                    <span>
-                      <strong className="text-zinc-100">1페이지 고정</strong>
-                      <span className="mt-0.5 block text-xs text-zinc-500">
-                        2페이지 이상이면 서버가 1페이지에 맞게 다시 줄입니다. 진행 메시지가 버튼 위에 표시됩니다.
-                      </span>
-                    </span>
-                  </label>
-                  <label className="flex cursor-pointer items-start gap-3 text-sm text-zinc-300">
-                    <input
-                      type="radio"
-                      name="pagePolicy"
-                      checked={pagePolicy === "allow_multi"}
-                      onChange={() => setPagePolicy("allow_multi")}
-                      className="mt-1 accent-emerald-500"
-                    />
-                    <span>
-                      <strong className="text-zinc-100">여러 페이지 허용</strong>
-                      <span className="mt-0.5 block text-xs text-zinc-500">
-                        1페이지 강제 없이 생성만 합니다. 긴 이력서에 적합합니다.
-                      </span>
-                    </span>
-                  </label>
-                </div>
-                {loading && progressMessage && (
-                  <p className="mt-4 rounded-lg border border-emerald-900/40 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-200/95">
-                    {progressMessage}
-                  </p>
-                )}
-                {error && (
-                  <p className="mt-4 rounded-lg bg-red-950/50 px-3 py-2 text-sm text-red-300">{error}</p>
-                )}
-                <button
-                  type="button"
-                  disabled={!canSubmit || loading}
-                  onClick={onSubmit}
-                  className="mt-6 w-full rounded-xl bg-emerald-600 py-3 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {loading
-                    ? progressMessage ?? "생성 중… (30–120초 정도 걸릴 수 있습니다)"
-                    : "Generate resume"}
-                </button>
-              </div>
+              <UploadForm
+                file={file}
+                setFile={handleSetFile}
+                paste={paste}
+                setPaste={handleSetPaste}
+                contactEmail={contactEmail}
+                setContactEmail={setContactEmail}
+                contactLinkedin={contactLinkedin}
+                setContactLinkedin={setContactLinkedin}
+                contactPhone={contactPhone}
+                setContactPhone={setContactPhone}
+                pagePolicy={pagePolicy}
+                setPagePolicy={setPagePolicy}
+                loading={loading}
+                progressMessage={progressMessage}
+                error={error}
+                canSubmit={canSubmit}
+                onSubmit={onSubmit}
+              />
             </div>
           </div>
         ) : (
@@ -646,116 +565,21 @@ export default function Home() {
             </div>
 
             {tab === "preview" && (
-              <div className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-medium text-zinc-300">PDF preview (Docker TeX Live + latexmk)</p>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setPdfRefresh((n) => n + 1)}
-                      disabled={pdfLoading}
-                      className="text-xs text-amber-400 hover:underline disabled:opacity-40"
-                    >
-                      Rebuild PDF
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowTextPreview((v) => !v)}
-                      className="text-xs text-emerald-400 hover:underline"
-                    >
-                      {showTextPreview ? "Hide text list" : "Show plain text list"}
-                    </button>
-                  </div>
-                </div>
-                {pdfLoading && (
-                  <p className="text-sm text-zinc-500">Compiling PDF… (first run may take 10–30s)</p>
-                )}
-                {pdfError && (
-                  <div className="rounded-lg border border-amber-900/50 bg-amber-950/30 p-4 text-sm text-amber-100">
-                    <p className="font-medium text-amber-200">PDF preview unavailable</p>
-                    <p className="mt-2 whitespace-pre-wrap font-mono text-xs text-zinc-400">{pdfError.slice(0, 2000)}</p>
-                    <p className="mt-3 text-xs text-zinc-500">
-                      Ensure Docker is running and the TeX image is built:{" "}
-                      <code className="rounded bg-zinc-800 px-1">docker compose build texlive</code> from the repo root,
-                      then restart the API. See README for <code className="rounded bg-zinc-800 px-1">LATEX_DOCKER_*</code>{" "}
-                      in <code className="rounded bg-zinc-800 px-1">api/.env</code>.
-                    </p>
-                  </div>
-                )}
-                {pdfUrl && !pdfLoading && (
-                  <div className="overflow-hidden rounded-lg border border-zinc-700 bg-white">
-                    <iframe
-                      title="Resume PDF"
-                      src={`${pdfUrl}#toolbar=1`}
-                      className="h-[min(85vh,1100px)] w-full"
-                    />
-                  </div>
-                )}
-                {showTextPreview && (
-                  <div className="mt-6 space-y-6 border-t border-zinc-800 pt-6">
-                    <p className="text-xs text-zinc-500">Plain bullet list (no LaTeX layout)</p>
-                    {result.preview_sections.map((sec, i) => (
-                      <section key={i} className="border-b border-zinc-800 pb-6 last:border-0">
-                        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-500/90">
-                          {KIND_LABEL[sec.kind] || sec.kind}
-                        </div>
-                        <h3 className="text-base font-semibold text-white">{sec.title}</h3>
-                        {sec.subtitle && <p className="text-sm italic text-zinc-400">{sec.subtitle}</p>}
-                        <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-zinc-300">
-                          {sec.bullets.map((b, j) => (
-                            <li key={j}>{b}</li>
-                          ))}
-                        </ul>
-                      </section>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <PdfPreview
+                result={result}
+                pdfUrl={pdfUrl}
+                pdfBlob={pdfBlob}
+                pdfLoading={pdfLoading}
+                pdfError={pdfError}
+                showTextPreview={showTextPreview}
+                setShowTextPreview={setShowTextPreview}
+                onRebuild={() => setPdfRefresh((n) => n + 1)}
+              />
             )}
 
-            {tab === "coaching" && (
-              <div className="space-y-8 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6">
-                <p className="text-sm text-zinc-400">
-                  Why each section and bullet is stronger — recruiter scan + credibility.
-                </p>
-                {result.preview_sections.map((sec, i) => {
-                  const coach = result.coaching[i];
-                  return (
-                    <section key={i} className="border-b border-zinc-800 pb-8 last:border-0 last:pb-0">
-                      <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-500/90">
-                        {KIND_LABEL[sec.kind] || sec.kind}
-                      </div>
-                      <h3 className="mt-1 text-base font-semibold text-white">{sec.title}</h3>
-                      {coach?.section_why && (
-                        <div className="mt-3 rounded-lg border border-amber-900/40 bg-amber-950/20 px-4 py-3">
-                          <div className="text-xs font-medium text-amber-200/90">Why this block works</div>
-                          <p className="mt-1 text-sm leading-relaxed text-zinc-300">{coach.section_why}</p>
-                        </div>
-                      )}
-                      <ul className="mt-4 space-y-4">
-                        {sec.bullets.map((b, j) => (
-                          <li key={j} className="rounded-lg border border-zinc-700/60 bg-zinc-900/80 p-4">
-                            <p className="text-sm text-zinc-200">{b}</p>
-                            {coach?.items[j]?.why_better && (
-                              <p className="mt-2 border-t border-zinc-800 pt-2 text-sm text-emerald-400/90">
-                                <span className="font-medium text-emerald-500">Stronger because: </span>
-                                {coach.items[j].why_better}
-                              </p>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                    </section>
-                  );
-                })}
-              </div>
-            )}
+            {tab === "coaching" && <CoachingPanel result={result} />}
 
-            {tab === "latex" && (
-              <pre className="max-h-[70vh] overflow-auto rounded-2xl border border-zinc-800 bg-zinc-950 p-4 text-xs leading-relaxed text-emerald-200/80">
-                {result.latex_document}
-              </pre>
-            )}
+            {tab === "latex" && <LatexViewer latex={result.latex_document} />}
           </div>
         )}
       </main>

@@ -7,7 +7,7 @@
    - 확인: `which pdftoppm`
 
 2. **Pillow** — API venv에 설치되어 있는가?  
-   - `pip install -r requirements.txt` (이미 `Pillow` 포함)
+   - `cd api && uv sync --dev` (이미 `Pillow` 포함)
 
 3. **`GET /health`** — `compiler.pdf_density_check_ready` 가 **`true`** 인가?  
    - `false`면 밀도 측정·underfull 판정이 동작하지 않음.
@@ -24,8 +24,7 @@
 Overleaf “꽉 찬 1페이지” PDF로 숫자 고정:
 
 ```bash
-cd api && source .venv/bin/activate
-python scripts/measure_pdf_bottom_mean.py /path/to/golden.pdf
+cd api && uv run python scripts/measure_pdf_bottom_mean.py /path/to/golden.pdf
 ```
 
 출력된 `RESUME_UNDERFULL_GOLDEN_MEAN` 등을 `api/.env`에 넣기.
