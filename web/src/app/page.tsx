@@ -333,6 +333,12 @@ export default function Home() {
                 >
                   Resume Score
                 </Link>
+                <Link
+                  href="/resume-review"
+                  className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:border-violet-700 hover:text-violet-300"
+                >
+                  Resume Review
+                </Link>
               </div>
               <p className="text-xs text-zinc-500">
                 100+ résumés analyzed · ATS-friendly · LaTeX + coaching

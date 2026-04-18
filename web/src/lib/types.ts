@@ -102,3 +102,82 @@ export type ResumeScoreResponse = {
   ats_audit: AtsAudit;
   recommendations: Recommendation[];
 };
+
+// --- Resume Review Types (document-annotation UI) ---
+
+export type IssueBBox = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type IssueLocation = {
+  page: number;
+  bbox: IssueBBox | null;
+  section_id: string;
+  bullet_id: string;
+  line_hint: string;
+};
+
+export type IssueSeverity = "critical" | "moderate" | "minor";
+export type IssueCategory = "ats" | "impact" | "clarity" | "formatting" | "credibility";
+
+export type ReviewIssue = {
+  id: string;
+  title: string;
+  severity: IssueSeverity;
+  category: IssueCategory;
+  description: string;
+  location_label: string;
+  location: IssueLocation;
+  original_text: string;
+  suggested_text: string;
+  confidence: number;
+};
+
+export type CategoryScores = {
+  ats: number;
+  impact: number;
+  clarity: number;
+  formatting: number;
+  credibility: number;
+};
+
+export type CredibilityInfo = {
+  level: "high" | "medium" | "low";
+  signals: string[];
+};
+
+export type ResumeBulletView = {
+  id: string;
+  text: string;
+  issue_ids: string[];
+};
+
+export type ResumeRoleView = {
+  id: string;
+  company: string;
+  title: string;
+  date_range: string;
+  bullets: ResumeBulletView[];
+  issue_ids: string[];
+};
+
+export type ResumeSectionView = {
+  id: string;
+  type: "header" | "summary" | "education" | "experience" | "skills" | "projects" | "other";
+  title: string;
+  lines: string[];
+  roles: ResumeRoleView[];
+  issue_ids: string[];
+};
+
+export type ReviewResponse = {
+  resume_id: string;
+  overall_score: number;
+  category_scores: CategoryScores;
+  credibility: CredibilityInfo;
+  issues: ReviewIssue[];
+  sections: ResumeSectionView[];
+};
