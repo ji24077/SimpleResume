@@ -153,7 +153,7 @@ def _llm_fix_resume_schema(
         ],
         response_format={"type": "json_object"},
         temperature=0.15,
-        max_tokens=16_384,
+        
     )
     raw = completion.choices[0].message.content or "{}"
     return repair_json(raw)
@@ -227,7 +227,7 @@ def attempt_llm_latex_compile_fix(
         ],
         response_format={"type": "json_object"},
         temperature=0.1,
-        max_tokens=16_384,
+        
     )
     raw = completion.choices[0].message.content or "{}"
     try:

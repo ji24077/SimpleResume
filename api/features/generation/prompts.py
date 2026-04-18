@@ -27,13 +27,13 @@ Strict rules:
 - Output must be one valid JSON object only (no markdown fences).
 - Keys must be exactly: latex_document, preview_sections, coaching — no other keys.
 - The LaTeX preamble: copy === TEMPLATE === from the user message verbatim through the RESUME STARTS HERE line; do not change packages or macro names.
-- Do not invent employers, roles, dates, metrics, or technologies; ground content in --- RESUME SOURCE ---.
+- Do not invent employers, roles, dates, metrics, technologies, or filler bullets; ground content in --- RESUME SOURCE ---. NEVER generate generic bullets like "Completed coursework in..." or "Developed strong skills..." if the source does not say that.
 - Use ASCII in visible resume prose (no emoji or fancy Unicode punctuation).
 - No commentary outside JSON.
 
 You generate an ATS-friendly resume in LaTeX following the user message POLICIES and OUTPUT FORMAT.
 
-**First pass — maximize, do not minimize:** Extract and **refine** every usable fact from --- RESUME SOURCE --- into strong bullets (verb + scope + tools + outcome). **100% fidelity:** no sourced metric, tool name, system, or scope clause may be dropped—only rephrase or redistribute across **4–5** \\resumeItem per role. The first draft must be **rich** enough that a recruiter sees depth—not a sparse outline. The server compiles PDF and may tighten **filler** later; **you must not** pre-shrink into vague one-liners or token-length bullets to “save space.”
+**First pass — maximize, do not minimize (ZERO information loss):** Extract and **refine** every usable fact from --- RESUME SOURCE --- into strong bullets (verb + scope + tools + outcome). **100% fidelity:** no sourced metric, tool name, system, or scope clause may be dropped—for roles >4 months, preserve the exact bullet count from the source; for short stints (≤4 months), use 3–5 bullets. The first draft must be **rich** enough that a recruiter sees depth—not a sparse outline. The server compiles PDF and may tighten **filler** later; **you must not** pre-shrink into vague one-liners or token-length bullets to “save space.”
 """
 
 
@@ -182,7 +182,7 @@ Strict rules:
 - Preserve quantified metrics already in the document; do not change section order or the verbatim TEMPLATE preamble.
 - Do not add new projects or experiences unless explicitly listed under ALLOWED_FACTS.
 
-**Density goals:** Fill excessive bottom whitespace by making Experience **fuller**: target **4–5** \\resumeItem per role where facts exist. **Restore** any detail that looks over-compressed (vague verbs where specifics existed): re-expand using **only** facts already present in CURRENT_LATEX (same technologies, numbers, systems—do not drop them to “sound simple”). Turn thin one-liners into **1–2 line** bullets; split overloaded bullets only when clarity improves; do not invent new claims.
+**Density goals:** Fill excessive bottom whitespace by making Experience **fuller**: target as many \\resumeItem per role as the source has (commonly 4–8). **Restore** any detail that looks over-compressed (vague verbs where specifics existed): re-expand using **only** facts already present in CURRENT_LATEX (same technologies, numbers, systems—do not drop them to “sound simple”). Turn thin one-liners into **1–2 line** bullets; split overloaded bullets only when clarity improves; do not invent new claims.
 """
 
 
@@ -216,7 +216,14 @@ CRITICAL — LaTeX body shape (after the TEMPLATE marker line):
 
 2) Then \\vspace{-7pt} (only after \\end{center}, before first \\section)
 
-3) Education block EXACTLY:
+2b) Summary section (only if present in source):
+   \\section{Summary}
+   \\begin{itemize}[leftmargin=0in, label={}]
+     \\item[]\\small{1--2 concise lines: years-of-experience + domain + 1--2 strongest differentiators. No filler.}
+   \\end{itemize}
+   If the source has no summary/objective/profile section, skip this block entirely.
+
+3) Education block EXACTLY (NEVER invent bullets for education—only include \\resumeItemListStart/End if the source lists specific honors, coursework, or activities under that school; otherwise just the \\resumeSubheading with no bullets):
    \\section{Education}
    \\resumeSubHeadingListStart
      \\resumeSubheading{School}{date range}{degree line with \\textbf{field}}{}
@@ -257,7 +264,9 @@ CRITICAL — LaTeX body shape (after the TEMPLATE marker line):
 
 6) Close ALL open lists: \\resumeSubHeadingListEnd after the last experience/project block.
 
-7) Technical Skills EXACTLY this shape (three lines with \\vspace{3pt} between):
+7) Technical Skills EXACTLY this shape (three lines with \\vspace{3pt} between).
+   **Content rules for skills:** Keep as many skills from the source as possible — preserve the original breadth. But: (a) remove true duplicates and overlaps (e.g. if "Pandas" and "Python" both listed, keep both but don’t list "Python3" separately), (b) drop vague/non-technical filler ("Microsoft Office", "Communication", "Teamwork"), (c) group intuitively: Languages = programming languages, Frameworks = libraries/frameworks/platforms, Tools = infrastructure/DevOps/databases/visualization.
+   **Do NOT shrink the list aggressively** — a dense skills section is good for ATS.
    \\section{Technical Skills}
    \\begin{itemize}[leftmargin=0in, label={}]
      \\item[]\\small{
@@ -285,19 +294,24 @@ Target **one** U.S. letter page **after** the server may request mild tightening
 Retain **all** information from --- RESUME SOURCE --- (every school, job, project, skill, contact line, and fact). Reformat and tighten wording only; do not invent content.
 
 **100% source fidelity (non-negotiable):**
-- **Nothing sourced may vanish:** Every metric, technology name, library/API, team/audience scale, compliance label (e.g. WCAG), audit outcome, and concrete deliverable that appears in --- RESUME SOURCE --- must still appear in the resume (you may rephrase or move it to another bullet, but **not** omit it to look “cleaner” or shorter).
+- **Nothing sourced may vanish:** Every metric, technology name, library/API, team/audience scale, compliance label (e.g. WCAG), audit outcome, concrete deliverable, company name, role title, date range, GPA, certification, award, and course that appears in --- RESUME SOURCE --- must still appear in the resume (you may rephrase or move it to another bullet, but **not** omit it to look “cleaner” or shorter).
+- **Do NOT summarize away detail:** If the source has 8 bullet points for one role, all 8 points must appear as 8 separate items (merge only true duplicates). Never reduce a rich description into a vague one-liner.
+- **Do NOT drop sections:** If the source has a Summary, Objective, Profile, About Me, Awards, Certifications, or Publications section, you MUST include it. **Skip** Personal / Interests / Hobbies sections. Rename to standard headings if needed but never silently delete the content.
 - Plain, simple English is fine; **omission** of a sourced fact is not. If one page is tight, the server may adjust layout later—you must **not** pre-remove detail.
 
 **Maximize signal (first pass — required):**
 - Read the **entire** source; do not stop after a shallow skim. Turn responsibilities, project blurbs, and bullet lists into **distinct** \\resumeItem lines—one achievement or theme per item when the text supports it.
 - **Refine without deleting:** Normalize phrasing and strong verbs, but **surface** implied detail the source already suggests (e.g. stack, users, scale, integration partners) using **only** grounded facts—no new employers, numbers, or tools.
-- If the source lists **more** than five points for one job, **keep every fact** (metrics, tools, scope) by merging **only** true duplicates into **4–5** substantive \\resumeItem lines—never drop detail to hit the count.
+- If the source lists **more** than five points for one job, **keep every fact** (metrics, tools, scope)—output one \\resumeItem per distinct point. Merge **only** true duplicates; never drop detail to hit an arbitrary count.
 - **Forbidden output style:** A resume where most Experience \\resumeItem bodies read like titles or tags (under ~10–12 words) **without** the source being that thin. When the source has depth, bullets must read like **sentences**, not keywords.
 
 **Anti–over-compression (first pass):**
 - Do **not** drop whole bullets, roles, or projects because you assume one page—you are not the PDF engine.
-- If the source gives **many** distinct bullets for one job, prefer **one \\resumeItem per achievement**; if that would exceed **5**, fold **only** duplicate or overlapping facts so you still have **4–5** lines with **nothing** important removed.
-- **Experience bullets (count + fidelity):** Use **4–5** \\resumeItem lines per role when the source has enough material (**preserve** all original information and detail—rephrase and distribute across those bullets; use **fewer** only if the source truly has fewer distinct points; **never** omit technologies, metrics, or outcomes to shorten). Hard cap **5** per single \\resumeSubheading unless ALLOWED_FACTS says otherwise.
+- If the source gives **many** distinct bullets for one job, output **one \\resumeItem per achievement**. Fold **only** true duplicate or overlapping facts; **never** cap bullets at an arbitrary number—preserve the source’s bullet count for roles >4 months.
+- **Experience bullets (count + fidelity):**
+- **Short roles (≤4 months / internships / co-ops):** 3–5 \\resumeItem max. Condense the source into strong, high-signal bullets.
+- **Longer roles (>4 months):** Preserve the EXACT number of bullets from the source. If a role has 8 bullets, output 8 \\resumeItem. If it has 6, output 6. **Never** reduce count to fit an arbitrary limit—every original point must appear as its own \\resumeItem.
+- **Sub-headings within experience:** If the source organizes bullets under sub-categories (e.g. "ETL and data pipelines:", "Data Infrastructure:", "Commercial charging:"), preserve them as bold text within a \\resumeItem like: \\resumeItem{\\textbf{ETL and data pipelines:}} followed by the relevant bullets. This preserves the original structure.
 
 **Objective (bullets):**
 - Mention specific technologies where the source names them.
@@ -307,7 +321,8 @@ Retain **all** information from --- RESUME SOURCE --- (every school, job, projec
 
 **Projects (when present):** Aim for **2–4** \\resumeItem per project when the source describes work beyond a title—same substance rules as Experience.
 
-**Sections required:** Education, Experience, Projects (if relevant in the source), Technical Skills.
+**Sections required:** Education, Experience, Projects (if relevant in the source), Technical Skills (or Technical Summary if the source uses that heading). **Do NOT include a Personal / Interests / Hobbies section** even if the source has one.
+**Summary / Objective / Profile:** If the source contains a summary, objective, profile, or introductory paragraph, you MUST include it as \\section{Summary} placed immediately after the header and before Education. Rewrite it to be 1--2 lines only, impactful, and scannable: lead with years of experience + domain, then 1--2 strongest differentiators (e.g. scale, systems, outcomes). Cut generic filler ("passionate", "team player", "detail-oriented"). Never silently drop an intro section. HARD LIMIT: the Summary must not exceed 2 printed lines on the PDF.
 
 **Header links:** Never leave placeholder URLs like ``github.com/USER``, ``linkedin.com/in/...``, or ``https://SITE``---use real https URLs from the source, or omit the link and show plain text (no ``\\href`` / ``\\url`` with fake paths).
 
@@ -392,8 +407,8 @@ Generate an ATS-friendly resume from --- RESUME SOURCE --- (one-page **target**;
 
 **Maximize the first draft:** Your output should **feel full**—recruiter-grade detail from the source, not a stub. **100% of sourced facts** (numbers, tech names, systems, scope) must remain visible in the LaTeX—never sacrifice detail for a “simple” look.
 
-**First draft:** Every role, project, skill, and fact line from the source should appear (rephrased), not summarized away.
-**Experience:** **4–5** \\resumeItem per role when the source has enough material—**every** original detail **inside** those lines (merge **only** duplicate facts); fewer only if the source is thin; each item **sentence-level**, not keyword-only.
+**First draft:** Every role, project, skill, section, and fact line from the source should appear (rephrased), not summarized away. If the source has a Summary/Objective/Profile, include it as \\section{Summary}.
+**Experience:** For roles >4 months, preserve the EXACT bullet count from the source (8 source bullets = 8 \\resumeItem). For short stints (≤4 months / internships), condense to 3–5 strong bullets. **Every** original detail must appear; merge **only** true duplicates. Each item **sentence-level**, not keyword-only.
 **Projects:** **2–4** bullets when the source describes real work.
 
 Bullets should:
@@ -401,7 +416,7 @@ Bullets should:
 - Include quantified impact only when the source supports it.
 - **Mix 1- and 2-line** depth; prefer fuller lines over many tiny fragments; never merge **distinct** achievements into one vague line.
 
-Sections required: Education, Experience, Projects (if relevant), Technical Skills.
+Sections required: Summary (if in source), Education, Experience, Projects (if relevant), Technical Skills.
 Follow === POLICIES === for Dhruv-style LaTeX structure, title normalization, dates, and full coverage.
 """
     parts = [
@@ -514,7 +529,7 @@ ALLOWED_FACTS (you may incorporate **only** these additional factual claims, now
 The bottom whitespace is excessive on an otherwise one-page PDF. Increase density without new employers or projects unless listed in ALLOWED_FACTS.
 
 Increase density by:
-- **Per role:** Aim for **4–5** \\resumeItem lines when the text can support it (max **5** unless ALLOWED_FACTS adds material). **Do not** shorten bullets on this pass—**lengthen** thin lines so the page fills, using only facts already in CURRENT_LATEX.
+- **Per role:** Preserve existing bullet count; expand thin bullets to fill the page. **Do not** shorten or remove bullets on this pass—**lengthen** thin lines so the page fills, using only facts already in CURRENT_LATEX.
 - **Restore** specifics that were over-compressed (bring back tech names, subsystems, methods) if they still appear elsewhere in the document or can be split out from a dense line without inventing.
 - Expanding technical detail (method, scope, stack) using wording already implied.
 - Clarifying impact; slightly elaborating metrics **already present** (no new numbers).
@@ -581,7 +596,7 @@ Strict rules:
 
 You produce structured resume data; the server deterministically renders PDF-ready LaTeX.
 
-**First pass — maximize:** Pull **all** usable detail from the source into experience/project bullet **strings**—full sentences where possible, **4–5** bullets per job when material exists. **100% fidelity:** every sourced metric, technology, system, and scope clause must appear across those strings (rephrase OK; omission not OK). Do **not** return token-short strings when the source is rich.
+**First pass — maximize:** Pull **all** usable detail from the source into experience/project bullet **strings**—full sentences where possible. For longer roles (>4 months): preserve the EXACT bullet count from the source (8 source bullets = 8 strings). For short stints (≤4 months / internships): 3–5 strings. **100% fidelity:** every sourced metric, technology, system, and scope clause must appear across those strings (rephrase OK; omission not OK). Do **not** return token-short strings when the source is rich.
 """
 
 STRUCTURED_FIXER_SYSTEM = """You are a resume data revision engine.
@@ -605,9 +620,9 @@ Strict rules:
 - Do not invent new employers, projects, roles, dates, or metrics.
 - Expand density by elaborating wording already supported by CURRENT_RESUME_DATA (and ALLOWED_FACTS if present).
 - Preserve quantified metrics already implied; do not add new numbers.
-- Max 5 bullets per experience entry when expanding.
+- Preserve existing bullet count per experience entry; do not cap when expanding.
 
-**Density goals:** Target **4–5** bullets per experience entry when facts allow. **Never** shorten on this pass—expand thin strings so the page fills; **preserve and restore** every tech name, metric, and scope already in CURRENT_RESUME_DATA. Use **1–2 sentence** strings with full context. Split one overloaded bullet into two only if both stay truthful.
+**Density goals:** Preserve existing bullet count per experience entry; expand thin strings. **Never** shorten on this pass—expand thin strings so the page fills; **preserve and restore** every tech name, metric, and scope already in CURRENT_RESUME_DATA. Use **1–2 sentence** strings with full context. Split one overloaded bullet into two only if both stay truthful.
 """
 
 
@@ -646,7 +661,7 @@ resume_data MUST match this shape (all string fields plain text; no LaTeX):
 Rules:
 - Include header.name; use links for GitHub/LinkedIn/website (https URLs) plus email for mailto.
 - education / experience / projects may be empty arrays only if the source truly has none (usually at least one of education or experience exists).
-- Every experience entry MUST have a non-empty bullets array: **4–5** strings when the source has enough material—**100%** of sourced facts (metrics, technologies, systems, scope) must appear across those strings (merge **only** duplicate facts); fewer strings only if the source is thin. Each string should be **one or two sentences** of plain text (substantive), not a 3–5 word tag—unless the source is genuinely one fact. Max **5** strings per entry unless ALLOWED_FACTS applies.
+- Every experience entry MUST have a non-empty bullets array. For longer roles (>4 months): preserve the EXACT bullet count from the source (if a role has 8 bullets, output 8 strings). For short stints (≤4 months / internships): 3–5 strings. **100%** of sourced facts (metrics, technologies, systems, scope) must appear across those strings (merge **only** true duplicate facts); fewer strings only if the source is genuinely thin. Each string should be **one or two sentences** of plain text (substantive), not a 3–5 word tag—unless the source is genuinely one fact.
 - Project bullets: **2–4** strings when the source describes work (same substance rule).
 - skills must be present; at least one of languages, frameworks, or tools must list a non-empty string.
 """
@@ -682,7 +697,7 @@ From --- RESUME SOURCE ---, produce structured resume_data for a U.S. ATS-friend
 **Maximize:** The rendered resume must **read dense** when the source is dense—extract and refine **every** distinct win. **100% fidelity:** no sourced metric, tool, or scope may be omitted. Do not output sparse JSON to “save tokens.”
 
 **First pass:** Every role, project, and skill from the source—no pre-trim.
-**Experience:** **4–5** bullet strings per entry when the source supports it—**all** source detail retained inside them; **one string per distinct achievement** when listed separately (if >5 points, combine redundant facts only, never drop metrics/tools).
+**Experience:** For longer roles (>4 months): preserve the EXACT bullet count from the source (8 source bullets = 8 strings)—**all** source detail retained; **one string per distinct achievement** when listed separately (combine only true duplicates, never drop metrics/tools). For short stints (≤4 months / internships): 3–5 strings.
 **Projects:** **2–4** bullet strings when work is described.
 Bullet strings: **sentence-level** prose; **mix** shorter and longer lines; forbid a pattern where most bullets are single short clauses when the source has more to say.
 """
@@ -778,7 +793,7 @@ ALLOWED_FACTS (you may incorporate **only** these additional factual claims, now
 
 The one-page PDF has too much bottom whitespace. Increase density via resume_data only: expand bullets using
 wording already supported by CURRENT_RESUME_DATA. No new employers or projects unless in ALLOWED_FACTS.
-Aim for **4–5** bullets per experience entry (max 5). **Expand** thin strings; **restore** any specificity that was lost to prior compression—every tech/metric in CURRENT_RESUME_DATA must stay visible. Use **longer 1–2 line** bullet strings.{allowed_block}
+Preserve existing bullet count per experience entry. **Expand** thin strings; **restore** any specificity that was lost to prior compression—every tech/metric in CURRENT_RESUME_DATA must stay visible. Use **longer 1–2 line** bullet strings.{allowed_block}
 
 {JSON_KEYS_REMINDER_STRUCTURED}
 

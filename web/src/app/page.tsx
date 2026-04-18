@@ -327,6 +327,12 @@ export default function Home() {
                 >
                   Compile LaTeX only
                 </Link>
+                <Link
+                  href="/resume-score"
+                  className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:border-sky-700 hover:text-sky-300"
+                >
+                  Resume Score
+                </Link>
               </div>
               <p className="text-xs text-zinc-500">
                 100+ résumés analyzed · ATS-friendly · LaTeX + coaching

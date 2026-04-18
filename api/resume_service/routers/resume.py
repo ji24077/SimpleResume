@@ -80,7 +80,7 @@ def _run_checker_llm(
             ],
             response_format={"type": "json_object"},
             temperature=0.15,
-            max_tokens=4096,
+            
         )
         raw = completion.choices[0].message.content or "{}"
         data = repair_json(raw)
@@ -165,7 +165,8 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
     user_msg += (
         "\n=== SERVER PIPELINE NOTE ===\n"
         "First pass: **maximize** grounded detail from RESUME SOURCE—**100%** of metrics/tech names/scope must stay in the output (rephrase OK, omit never). "
-        "Experience **4–5** sentence-level bullets per role when material exists; mix **1- and 2-line** depth. "
+        "For longer roles (>4 months): preserve the EXACT bullet count from the source (8 source bullets = 8 items). "
+        "For short stints (≤4 months / internships): 3–5 bullets. Mix **1- and 2-line** depth. "
         "If PDF >1 page, server asks for **fit_one_page**: remove filler words only—**not** facts—then densify may refill bottom whitespace from existing facts.\n"
     )
     if settings.resume_density_expand_max > 0:
@@ -191,7 +192,7 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
             ],
             response_format={"type": "json_object"},
             temperature=0.35,
-            max_tokens=16_384,
+            
         )
     except Exception as e:
         logger.exception("OpenAI error")
@@ -261,7 +262,7 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                         ],
                         response_format={"type": "json_object"},
                         temperature=0.1,
-                        max_tokens=16_384,
+                        
                     )
                 except Exception as e:
                     logger.exception("OpenAI compile-fix error (allow_multi)")
@@ -419,7 +420,7 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                             ],
                             response_format={"type": "json_object"},
                             temperature=0.1,
-                            max_tokens=16_384,
+                            
                         )
                     except Exception as e:
                         logger.exception("OpenAI compile-fix error")
@@ -524,7 +525,7 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                         ],
                         response_format={"type": "json_object"},
                         temperature=0.25,
-                        max_tokens=16_384,
+                        
                     )
                 except Exception as e:
                     logger.exception("OpenAI revision error")
@@ -649,7 +650,7 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                                     ],
                                     response_format={"type": "json_object"},
                                     temperature=0.22,
-                                    max_tokens=16_384,
+                                    
                                 )
                             except Exception as e:
                                 logger.warning("ATS fix LLM error: %s", e)
@@ -796,7 +797,7 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                     ],
                     response_format={"type": "json_object"},
                     temperature=0.28,
-                    max_tokens=16_384,
+                    
                 )
             except Exception as e:
                 logger.exception("OpenAI density-expand error")

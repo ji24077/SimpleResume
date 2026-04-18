@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from resume_service.config import settings
-from resume_service.routers import health, compile, resume, coaching
+from resume_service.routers import health, compile, resume, coaching, resume_score
 
 app = FastAPI(title="SimpleResume API", version="0.1.0")
 
@@ -20,3 +20,4 @@ app.include_router(health.router)
 app.include_router(compile.router)
 app.include_router(resume.router)
 app.include_router(coaching.router)
+app.include_router(resume_score.router)

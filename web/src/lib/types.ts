@@ -36,3 +36,69 @@ export type GenerateResponse = {
   /** Checker LLM diagnostic issues (RESUME_QUALITY_CHECKER=1) */
   quality_issues?: Array<Record<string, unknown>> | null;
 };
+
+// --- ResumeScore Types ---
+
+export type RubricScore = {
+  score: number;
+  reason: string;
+  suggestion: string;
+};
+
+export type RepairReadiness = {
+  recoverability: string;
+  missing_dimensions: string[];
+  ask_back_priority: string;
+  revision_gain_potential: number;
+};
+
+export type BulletAnalysis = {
+  id: string;
+  role_id: string;
+  text: string;
+  composite_score: number;
+  rubrics: Record<string, RubricScore>;
+  tags: string[];
+  strengths: string[];
+  issues: string[];
+  repair_readiness: RepairReadiness;
+};
+
+export type RoleAnalysis = {
+  id: string;
+  company: string;
+  title: string;
+  date_range: string;
+  composite_score: number;
+  rubrics: Record<string, RubricScore>;
+  strengths: string[];
+  issues: string[];
+};
+
+export type AtsAudit = {
+  parseability: RubricScore;
+  section_completeness: RubricScore;
+  format_consistency: RubricScore;
+  keyword_coverage: RubricScore;
+  issues: string[];
+};
+
+export type Recommendation = {
+  category: string;
+  text: string;
+  priority: string;
+  expected_gain: number;
+};
+
+export type ResumeScoreResponse = {
+  overall_score: number;
+  grade: string;
+  summary: string;
+  top_strengths: string[];
+  top_issues: string[];
+  resume_rubrics: Record<string, RubricScore>;
+  roles: RoleAnalysis[];
+  bullets: BulletAnalysis[];
+  ats_audit: AtsAudit;
+  recommendations: Recommendation[];
+};
