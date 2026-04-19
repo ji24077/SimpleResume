@@ -204,6 +204,7 @@ def score_resume(text: str, job_description: str = "") -> ResumeScoreResponse:
 
             strengths = llm_bullet.get("strengths", []) if isinstance(llm_bullet, dict) else []
             issues = llm_bullet.get("issues", []) if isinstance(llm_bullet, dict) else []
+            rewrite = str(llm_bullet.get("rewrite", "")) if isinstance(llm_bullet, dict) else ""
 
             bullets.append(BulletAnalysis(
                 id=_bullet_id(bt, pr.id),
@@ -214,6 +215,7 @@ def score_resume(text: str, job_description: str = "") -> ResumeScoreResponse:
                 tags=tags,
                 strengths=strengths[:3],
                 issues=issues[:3],
+                rewrite=rewrite,
                 repair_readiness=repair,
             ))
 

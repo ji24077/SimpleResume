@@ -73,16 +73,17 @@ Return a JSON object with this exact structure:
     }}
   ],
   "bullets": [
-    For each bullet point found in any role (include at least the first 5 most notable):
+    For EVERY bullet point found in EVERY role (do NOT skip any bullet):
     {{
       "text": "<exact bullet text>",
       "role_id": "<role id this bullet belongs to>",
       "rubrics": {{
         For each of [{bullet_rubrics_list}]:
-        "<rubric_name>": {{"score": <float 0-10>, "reason": "<1 sentence>", "suggestion": "<1 sentence or empty>"}}
+        "<rubric_name>": {{"score": <float 0-10>, "reason": "<1 sentence>", "suggestion": "<specific rewrite of this bullet or empty>"}}
       }},
       "strengths": ["<strength>", ...],
-      "issues": ["<issue>", ...]
+      "issues": ["<specific actionable issue>", ...],
+      "rewrite": "<full improved version of this bullet with metrics, scope, and impact — or empty if bullet scores 8+>"
     }}
   ]
 }}
@@ -95,6 +96,8 @@ Scoring guidelines:
 - 1-2: Poor, major rewrite needed
 - Be honest and specific. Focus on actionable feedback.
 - Score relative to professional software engineering resumes.
+- IMPORTANT: Include ALL bullets from ALL roles. Do NOT skip any.
+- For each bullet's "rewrite" field: provide a concrete improved version (not a generic tip). Add specific metrics, technologies, scope, and outcomes. If the bullet is already strong (score 8+), leave "rewrite" empty.
 {f'- Evaluate relevance against the provided job description.' if job_description else ''}"""
 
 

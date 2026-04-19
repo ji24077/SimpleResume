@@ -117,56 +117,67 @@ def _issues_from_bullets(
     bullets: list[BulletAnalysis],
     roles: list[RoleAnalysis],
 ) -> list[ReviewIssue]:
+    """One consolidated issue per bullet (not per tag)."""
     issues: list[ReviewIssue] = []
     for bullet in bullets:
+        if bullet.composite_score >= 8 and not bullet.tags and not bullet.issues:
+            continue
+
         role = next((r for r in roles if r.id == bullet.role_id), None)
         loc_label = _bullet_location_label(bullet, roles)
         location = IssueLocation(
             section_id="experience",
             bullet_id=bullet.id,
-            line_hint=bullet.text[:60],
+            line_hint=loc_label,
         )
 
-        for tag in bullet.tags:
-            sev = "moderate" if bullet.composite_score >= 5 else "critical"
-            cat = "impact"
-            if tag in ("Missing Metric", "Missing Scope"):
-                cat = "impact"
-            elif tag in ("Too Short", "Too Long", "Vague"):
-                cat = "clarity"
+        sev = _severity_from_score(bullet.composite_score)
 
-            suggestion = ""
-            for name, rubric in bullet.rubrics.items():
-                if rubric.suggestion:
-                    suggestion = rubric.suggestion
+        tag_str = ", ".join(bullet.tags) if bullet.tags else ""
+        issue_strs = bullet.issues[:3]
+
+        title_parts = []
+        if tag_str:
+            title_parts.append(tag_str)
+        if issue_strs and not tag_str:
+            title_parts.append(issue_strs[0][:60])
+        title = " · ".join(title_parts) if title_parts else "Could be stronger"
+
+        desc_lines = []
+        for iss in issue_strs:
+            desc_lines.append(f"• {iss}")
+        low_rubrics = sorted(
+            [(n, r) for n, r in bullet.rubrics.items() if r.score < 6 and r.reason],
+            key=lambda x: x[1].score,
+        )[:2]
+        for name, rubric in low_rubrics:
+            if rubric.reason not in "\n".join(desc_lines):
+                desc_lines.append(f"• {name.replace('_', ' ').title()}: {rubric.reason}")
+        description = "\n".join(desc_lines) if desc_lines else f"Score: {bullet.composite_score}/10"
+
+        cat = "impact"
+        if any(t in ("Too Short", "Too Long", "Vague") for t in bullet.tags):
+            cat = "clarity"
+
+        suggested = bullet.rewrite or ""
+        if not suggested:
+            for rubric in bullet.rubrics.values():
+                if rubric.suggestion and len(rubric.suggestion) > 20:
+                    suggested = rubric.suggestion
                     break
 
-            issues.append(ReviewIssue(
-                id=_issue_id("btag", f"{bullet.id}_{tag}"),
-                title=tag,
-                severity=sev,
-                category=cat,
-                description=f"Bullet: \"{bullet.text[:80]}...\"" if len(bullet.text) > 80 else f"Bullet: \"{bullet.text}\"",
-                location_label=loc_label,
-                location=location,
-                original_text=bullet.text,
-                suggested_text=suggestion,
-                confidence=round(min(1.0, max(0.0, (10 - bullet.composite_score) / 10)), 2),
-            ))
-
-        for issue_text in bullet.issues:
-            issues.append(ReviewIssue(
-                id=_issue_id("biss", f"{bullet.id}_{issue_text}"),
-                title=issue_text[:80],
-                severity=_severity_from_score(bullet.composite_score),
-                category="impact",
-                description=issue_text,
-                location_label=loc_label,
-                location=location,
-                original_text=bullet.text,
-                suggested_text="",
-                confidence=0.7,
-            ))
+        issues.append(ReviewIssue(
+            id=_issue_id("bullet", bullet.id),
+            title=title,
+            severity=sev,
+            category=cat,
+            description=description,
+            location_label=loc_label,
+            location=location,
+            original_text=bullet.text,
+            suggested_text=suggested,
+            confidence=round(min(1.0, max(0.0, (10 - bullet.composite_score) / 10)), 2),
+        ))
 
     return issues
 

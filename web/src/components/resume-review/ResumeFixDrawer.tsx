@@ -92,10 +92,16 @@ export default function ResumeFixDrawer({
           </div>
         )}
 
-        {/* Why this matters */}
+        {/* Why this matters — render line-by-line for bullet points */}
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">Why This Matters</p>
-          <p className="mt-1 text-xs leading-relaxed text-zinc-300">{issue.description}</p>
+          <div className="mt-1 space-y-1">
+            {issue.description.split("\n").map((line, i) => (
+              <p key={i} className="text-xs leading-relaxed text-zinc-300">
+                {line}
+              </p>
+            ))}
+          </div>
         </div>
 
         {/* Original text */}
@@ -103,7 +109,7 @@ export default function ResumeFixDrawer({
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">Original Text</p>
             <div className="mt-1 rounded-lg border border-red-900/30 bg-red-950/20 p-3">
-              <p className="text-xs leading-relaxed text-zinc-300 font-mono">{issue.original_text}</p>
+              <p className="text-xs leading-relaxed text-red-200/80 font-mono">{issue.original_text}</p>
             </div>
           </div>
         )}
@@ -113,8 +119,15 @@ export default function ResumeFixDrawer({
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">Suggested Rewrite</p>
             <div className="mt-1 rounded-lg border border-emerald-900/30 bg-emerald-950/20 p-3">
-              <p className="text-xs leading-relaxed text-zinc-300 font-mono">{issue.suggested_text}</p>
+              <p className="text-xs leading-relaxed text-emerald-200/80 font-mono">{issue.suggested_text}</p>
             </div>
+          </div>
+        )}
+
+        {/* No suggestion fallback */}
+        {!issue.suggested_text && issue.original_text && (
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+            <p className="text-[10px] font-medium text-zinc-500">No automatic rewrite available. Use the feedback above to improve this bullet manually.</p>
           </div>
         )}
       </div>

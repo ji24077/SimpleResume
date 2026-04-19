@@ -122,11 +122,13 @@ export default function CommentPanel({
               const isSelected = issue.id === selectedIssueId;
 
               return (
-                <button
+                <div
                   key={issue.id}
-                  type="button"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => onSelectIssue(issue)}
-                  className={`group w-full px-4 py-3 text-left transition hover:bg-zinc-900/50 ${
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onSelectIssue(issue); }}
+                  className={`group w-full cursor-pointer px-4 py-3 text-left transition hover:bg-zinc-900/50 ${
                     isSelected ? "bg-zinc-900/80 border-l-2 border-l-sky-500" : "border-l-2 border-l-transparent"
                   }`}
                 >
@@ -186,7 +188,7 @@ export default function CommentPanel({
                       </button>
                     </div>
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>

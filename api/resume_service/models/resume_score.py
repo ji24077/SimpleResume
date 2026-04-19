@@ -27,6 +27,7 @@ class BulletAnalysis(BaseModel):
     tags: list[str] = Field(default_factory=list)
     strengths: list[str] = Field(default_factory=list)
     issues: list[str] = Field(default_factory=list)
+    rewrite: str = ""
     repair_readiness: RepairReadiness = Field(default_factory=RepairReadiness)
 
 
