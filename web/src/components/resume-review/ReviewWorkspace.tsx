@@ -3,8 +3,9 @@
 import { useState, useCallback } from "react";
 import type { ReviewResponse, ReviewIssue } from "@/lib/types";
 import ResumeScoreHeader from "./ResumeScoreHeader";
-import ResumeIssuePanel from "./ResumeIssuePanel";
+import PdfAnnotationViewer from "./PdfAnnotationViewer";
 import AnnotatedResume from "./AnnotatedResume";
+import CommentPanel from "./CommentPanel";
 import ResumeFixDrawer from "./ResumeFixDrawer";
 
 interface ReviewWorkspaceProps {
@@ -15,7 +16,7 @@ interface ReviewWorkspaceProps {
 export default function ReviewWorkspace({ review, pdfUrl }: ReviewWorkspaceProps) {
   const [selectedIssue, setSelectedIssue] = useState<ReviewIssue | null>(null);
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
-  const [mobileView, setMobileView] = useState<"preview" | "issues">("issues");
+  const [mobileView, setMobileView] = useState<"preview" | "comments">("preview");
 
   const visibleIssues = review.issues.filter((i) => !dismissedIds.has(i.id));
 
@@ -25,14 +26,12 @@ export default function ReviewWorkspace({ review, pdfUrl }: ReviewWorkspaceProps
 
   const handleFixTopIssues = useCallback(() => {
     const first = visibleIssues.find((i) => i.severity === "critical") || visibleIssues[0];
-    if (first) {
-      setSelectedIssue(first);
-    }
+    if (first) setSelectedIssue(first);
   }, [visibleIssues]);
 
   const handleApplySuggestion = useCallback((issue: ReviewIssue) => {
-    // TODO: Integrate with resume editing when available
-    console.log("Apply suggestion for:", issue.id, issue.suggested_text);
+    // TODO: integrate with resume editing
+    console.log("Apply suggestion for:", issue.id);
     setDismissedIds((prev) => new Set([...prev, issue.id]));
     setSelectedIssue(null);
   }, []);
@@ -43,14 +42,13 @@ export default function ReviewWorkspace({ review, pdfUrl }: ReviewWorkspaceProps
   }, []);
 
   const handleMarkNotHelpful = useCallback((issue: ReviewIssue) => {
-    // TODO: Send feedback to backend
     console.log("Marked not helpful:", issue.id);
     setDismissedIds((prev) => new Set([...prev, issue.id]));
     setSelectedIssue(null);
   }, []);
 
   return (
-    <div className="flex h-screen flex-col bg-zinc-950 text-zinc-100">
+    <div className="flex h-full flex-col bg-zinc-950 text-zinc-100">
       {/* Sticky score header */}
       <ResumeScoreHeader
         overallScore={review.overall_score}
@@ -64,40 +62,51 @@ export default function ReviewWorkspace({ review, pdfUrl }: ReviewWorkspaceProps
       <div className="flex shrink-0 border-b border-zinc-800 lg:hidden">
         <button
           type="button"
-          onClick={() => setMobileView("issues")}
-          className={`flex-1 py-2.5 text-center text-xs font-medium transition ${
-            mobileView === "issues" ? "bg-zinc-900 text-white" : "text-zinc-500"
-          }`}
-        >
-          Issues ({visibleIssues.length})
-        </button>
-        <button
-          type="button"
           onClick={() => setMobileView("preview")}
           className={`flex-1 py-2.5 text-center text-xs font-medium transition ${
             mobileView === "preview" ? "bg-zinc-900 text-white" : "text-zinc-500"
           }`}
         >
-          Preview
+          Resume
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileView("comments")}
+          className={`flex-1 py-2.5 text-center text-xs font-medium transition ${
+            mobileView === "comments" ? "bg-zinc-900 text-white" : "text-zinc-500"
+          }`}
+        >
+          Comments ({visibleIssues.length})
         </button>
       </div>
 
-      {/* Main workspace: left = preview, right = issues + detail drawer */}
+      {/* Main workspace: left = PDF with highlights, right = comments panel */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Annotated resume (left) — hidden on mobile when issues tab selected */}
-        <div className={`flex-1 overflow-hidden p-3 ${mobileView === "issues" ? "hidden lg:block" : ""}`}>
-          <AnnotatedResume
-            sections={review.sections}
-            issues={visibleIssues}
-            selectedIssueId={selectedIssue?.id ?? null}
-            onClickIssue={handleSelectIssue}
-            pdfUrl={pdfUrl}
-          />
+        {/* PDF preview with highlights (left) */}
+        <div className={`flex-1 overflow-hidden ${mobileView === "comments" ? "hidden lg:block" : ""}`}>
+          {pdfUrl ? (
+            <PdfAnnotationViewer
+              pdfUrl={pdfUrl}
+              issues={visibleIssues}
+              selectedIssueId={selectedIssue?.id ?? null}
+              onSelectIssue={handleSelectIssue}
+            />
+          ) : (
+            <div className="h-full p-3">
+              <AnnotatedResume
+                sections={review.sections}
+                issues={visibleIssues}
+                selectedIssueId={selectedIssue?.id ?? null}
+                onClickIssue={handleSelectIssue}
+                pdfUrl={null}
+              />
+            </div>
+          )}
         </div>
 
-        {/* Right panel — hidden on mobile when preview tab selected */}
+        {/* Right panel: comments or fix drawer */}
         <div
-          className={`flex w-full flex-col overflow-hidden border-l border-zinc-800 lg:w-[420px] lg:max-w-[480px] ${
+          className={`flex w-full flex-col overflow-hidden border-l border-zinc-800 lg:w-[380px] lg:max-w-[420px] ${
             mobileView === "preview" ? "hidden lg:flex" : "flex"
           }`}
         >
@@ -110,10 +119,11 @@ export default function ReviewWorkspace({ review, pdfUrl }: ReviewWorkspaceProps
               onMarkNotHelpful={handleMarkNotHelpful}
             />
           ) : (
-            <ResumeIssuePanel
+            <CommentPanel
               issues={visibleIssues}
               selectedIssueId={selectedIssue ? (selectedIssue as ReviewIssue).id : null}
               onSelectIssue={handleSelectIssue}
+              onDismiss={handleDismiss}
             />
           )}
         </div>
