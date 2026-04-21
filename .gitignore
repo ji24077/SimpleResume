@@ -1,5 +1,6 @@
 api/.venv/
 .venv/
+.env
 api/.env
 web/.env.local
 web/.next/

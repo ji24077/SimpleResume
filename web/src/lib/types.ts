@@ -181,3 +181,67 @@ export type ReviewResponse = {
   issues: ReviewIssue[];
   sections: ResumeSectionView[];
 };
+
+// --- Verify-Parse / Structured Builder Types ---
+
+export type ResumeHeaderLink = {
+  label: string;
+  url: string;
+};
+
+export type ResumeHeader = {
+  name: string;
+  phone: string;
+  email: string;
+  links: ResumeHeaderLink[];
+};
+
+export type EducationEntry = {
+  school: string;
+  degree: string;
+  date: string;
+  location: string;
+  bullets: string[];
+};
+
+export type ExperienceEntry = {
+  title: string;
+  company: string;
+  date: string;
+  location: string;
+  bullets: string[];
+};
+
+export type ProjectEntry = {
+  name: string;
+  date: string;
+  tech_line: string;
+  bullets: string[];
+};
+
+export type SkillsBlock = {
+  languages: string[];
+  frameworks: string[];
+  tools: string[];
+};
+
+export type ResumeData = {
+  header: ResumeHeader;
+  education: EducationEntry[];
+  experience: ExperienceEntry[];
+  projects: ProjectEntry[];
+  skills: SkillsBlock;
+};
+
+export type ParseResponse = {
+  resume_data: ResumeData;
+  parse_warnings: string[];
+};
+
+export const EMPTY_RESUME_DATA: ResumeData = {
+  header: { name: "", phone: "", email: "", links: [] },
+  education: [],
+  experience: [],
+  projects: [],
+  skills: { languages: [], frameworks: [], tools: [] },
+};

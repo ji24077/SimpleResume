@@ -2,11 +2,17 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { GenerateResponse, PagePolicy } from "@/lib/types";
+import type { GenerateResponse, PagePolicy, ParseResponse, ResumeData } from "@/lib/types";
+import { EMPTY_RESUME_DATA } from "@/lib/types";
 import UploadForm from "@/components/UploadForm";
 import PdfPreview from "@/components/PdfPreview";
 import CoachingPanel from "@/components/CoachingPanel";
 import LatexViewer from "@/components/LatexViewer";
+import ResumeForm from "@/components/builder/ResumeForm";
+
+const FEATURE_PARSE_REVIEW = process.env.NEXT_PUBLIC_FEATURE_PARSE_REVIEW === "true";
+
+type BuilderPhase = "upload" | "parsing" | "form" | "generating" | "result";
 
 type BackendHealth = {
   ok?: boolean;
@@ -97,6 +103,9 @@ export default function Home() {
   const [contactEmail, setContactEmail] = useState("");
   const [contactLinkedin, setContactLinkedin] = useState("");
   const [contactPhone, setContactPhone] = useState("");
+  const [phase, setPhase] = useState<BuilderPhase>("upload");
+  const [resumeData, setResumeData] = useState<ResumeData>(EMPTY_RESUME_DATA);
+  const [parseWarnings, setParseWarnings] = useState<string[]>([]);
 
   const resumeBuilderRef = useRef<HTMLDivElement>(null);
   const scrollToResumeBuilder = useCallback(() => {
@@ -165,70 +174,46 @@ export default function Home() {
 
   const canSubmit = Boolean(file || paste.trim());
 
-  const onSubmit = useCallback(async () => {
-    setError(null);
-    setLoading(true);
-    setProgressMessage(null);
-    setResult(null);
-    try {
-      if (!file) {
-        const { needEmail, needLinkedin } = pasteContactGaps(paste);
-        if (needEmail && !contactEmail.trim()) {
-          setError(
-            "원문에서 이메일이 잘 안 보입니다. 아래 '연락처'에 이메일을 입력하거나, 원문에 주소를 적어 주세요."
-          );
-          setLoading(false);
-          return;
-        }
-        if (needLinkedin && !contactLinkedin.trim()) {
-          setError(
-            "원문에서 LinkedIn이 잘 안 보입니다. 아래에 프로필 URL을 입력하거나, 원문에 linkedin.com 링크를 넣어 주세요."
-          );
-          setLoading(false);
-          return;
-        }
-      }
-
-      let res: Response;
-      if (file) {
-        const fd = new FormData();
-        fd.append("file", file);
-        fd.append("page_policy", pagePolicy);
-        fd.append("contact_email", contactEmail);
-        fd.append("contact_linkedin", contactLinkedin);
-        fd.append("contact_phone", contactPhone);
-        res = await fetch("/api/generate-stream", { method: "POST", body: fd });
-      } else {
-        res = await fetch("/api/generate-stream", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            text: paste,
-            page_policy: pagePolicy,
-            contact_email: contactEmail,
-            contact_linkedin: contactLinkedin,
-            contact_phone: contactPhone,
-          }),
-        });
-      }
-
+  const readStreamResult = useCallback(
+    async (res: Response): Promise<GenerateResponse> => {
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
-        setError(
-          typeof json.detail === "string" ? json.detail : JSON.stringify(json.detail || json) || res.statusText
+        throw new Error(
+          typeof json.detail === "string"
+            ? json.detail
+            : JSON.stringify(json.detail || json) || res.statusText,
         );
-        return;
       }
-
-      if (!res.body) {
-        setError("Empty response from server");
-        return;
-      }
+      if (!res.body) throw new Error("Empty response from server");
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
       let finalResult: GenerateResponse | null = null;
+
+      const consumeLine = (line: string) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        let ev: {
+          type?: string;
+          message?: string;
+          message_en?: string;
+          data?: GenerateResponse;
+          detail?: string;
+        };
+        try {
+          ev = JSON.parse(trimmed) as typeof ev;
+        } catch {
+          return;
+        }
+        if (ev.type === "progress") {
+          setProgressMessage(ev.message ?? ev.message_en ?? null);
+        } else if (ev.type === "result" && ev.data) {
+          finalResult = ev.data as GenerateResponse;
+        } else if (ev.type === "error") {
+          throw new Error(ev.detail ?? "Generate failed");
+        }
+      };
 
       while (true) {
         const { done, value } = await reader.read();
@@ -236,57 +221,150 @@ export default function Home() {
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-          let ev: { type?: string; message?: string; message_en?: string; data?: GenerateResponse; detail?: string };
-          try {
-            ev = JSON.parse(trimmed) as typeof ev;
-          } catch {
-            continue;
-          }
-          if (ev.type === "progress") {
-            setProgressMessage(ev.message ?? ev.message_en ?? null);
-          } else if (ev.type === "result" && ev.data) {
-            finalResult = ev.data as GenerateResponse;
-          } else if (ev.type === "error") {
-            setError(ev.detail ?? "Generate failed");
-            return;
-          }
-        }
+        for (const line of lines) consumeLine(line);
       }
+      if (buffer.trim()) consumeLine(buffer);
 
-      const tail = buffer.trim();
-      if (tail) {
-        try {
-          const ev = JSON.parse(tail) as {
-            type?: string;
-            data?: GenerateResponse;
-            detail?: string;
-          };
-          if (ev.type === "result" && ev.data) finalResult = ev.data;
-          if (ev.type === "error") {
-            setError(ev.detail ?? "Generate failed");
-            return;
-          }
-        } catch {
-          /* ignore */
-        }
-      }
+      if (!finalResult) throw new Error("No result from stream");
+      return finalResult;
+    },
+    [],
+  );
 
-      if (!finalResult) {
-        setError("No result from stream");
+  const submitLegacyGenerate = useCallback(async () => {
+    let res: Response;
+    if (file) {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("page_policy", pagePolicy);
+      fd.append("contact_email", contactEmail);
+      fd.append("contact_linkedin", contactLinkedin);
+      fd.append("contact_phone", contactPhone);
+      res = await fetch("/api/generate-stream", { method: "POST", body: fd });
+    } else {
+      res = await fetch("/api/generate-stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: paste,
+          page_policy: pagePolicy,
+          contact_email: contactEmail,
+          contact_linkedin: contactLinkedin,
+          contact_phone: contactPhone,
+        }),
+      });
+    }
+    return readStreamResult(res);
+  }, [file, paste, pagePolicy, contactEmail, contactLinkedin, contactPhone, readStreamResult]);
+
+  const submitParse = useCallback(async (): Promise<ParseResponse> => {
+    let res: Response;
+    if (file) {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("contact_email", contactEmail);
+      fd.append("contact_linkedin", contactLinkedin);
+      fd.append("contact_phone", contactPhone);
+      res = await fetch("/api/parse", { method: "POST", body: fd });
+    } else {
+      res = await fetch("/api/parse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: paste,
+          contact_email: contactEmail,
+          contact_linkedin: contactLinkedin,
+          contact_phone: contactPhone,
+        }),
+      });
+    }
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(
+        typeof json.detail === "string"
+          ? json.detail
+          : JSON.stringify(json.detail || json) || res.statusText,
+      );
+    }
+    return (await res.json()) as ParseResponse;
+  }, [file, paste, contactEmail, contactLinkedin, contactPhone]);
+
+  const onSubmit = useCallback(async () => {
+    setError(null);
+    setProgressMessage(null);
+    setResult(null);
+    if (!file) {
+      const { needEmail, needLinkedin } = pasteContactGaps(paste);
+      if (needEmail && !contactEmail.trim()) {
+        setError(
+          "원문에서 이메일이 잘 안 보입니다. 아래 '연락처'에 이메일을 입력하거나, 원문에 주소를 적어 주세요.",
+        );
         return;
       }
+      if (needLinkedin && !contactLinkedin.trim()) {
+        setError(
+          "원문에서 LinkedIn이 잘 안 보입니다. 아래에 프로필 URL을 입력하거나, 원문에 linkedin.com 링크를 넣어 주세요.",
+        );
+        return;
+      }
+    }
+
+    setLoading(true);
+    try {
+      if (FEATURE_PARSE_REVIEW) {
+        setPhase("parsing");
+        const parsed = await submitParse();
+        setResumeData(parsed.resume_data);
+        setParseWarnings(parsed.parse_warnings ?? []);
+        setPhase("form");
+        return;
+      }
+      const finalResult = await submitLegacyGenerate();
       setResult(finalResult);
+      setPhase("result");
       setTab("preview");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Request failed");
+      setPhase("upload");
     } finally {
       setLoading(false);
       setProgressMessage(null);
     }
-  }, [file, paste, pagePolicy, contactEmail, contactLinkedin, contactPhone]);
+  }, [file, paste, contactEmail, contactLinkedin, submitLegacyGenerate, submitParse]);
+
+  const onGenerateFromForm = useCallback(async () => {
+    setError(null);
+    setProgressMessage(null);
+    setResult(null);
+    setLoading(true);
+    setPhase("generating");
+    try {
+      const res = await fetch("/api/generate-structured", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          resume_data: resumeData,
+          page_policy: pagePolicy,
+        }),
+      });
+      const finalResult = await readStreamResult(res);
+      setResult(finalResult);
+      setPhase("result");
+      setTab("preview");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Request failed");
+      setPhase("form");
+    } finally {
+      setLoading(false);
+      setProgressMessage(null);
+    }
+  }, [resumeData, pagePolicy, readStreamResult]);
+
+  const backToUpload = useCallback(() => {
+    setPhase("upload");
+    setError(null);
+    setProgressMessage(null);
+  }, []);
 
   const handleSetFile = useCallback((f: File | null) => {
     setFile(f);
@@ -311,6 +389,9 @@ export default function Home() {
     setContactLinkedin("");
     setContactPhone("");
     setError(null);
+    setResumeData(EMPTY_RESUME_DATA);
+    setParseWarnings([]);
+    setPhase("upload");
   };
 
   return (
@@ -371,7 +452,40 @@ export default function Home() {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 py-10">
-        {!result ? (
+        {phase === "parsing" && (
+          <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
+            <div className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-700 border-t-emerald-500" />
+            <p className="text-sm text-zinc-300">Reading your resume…</p>
+            <p className="text-xs text-zinc-500">
+              Extracting sections so you can review before we rewrite.
+            </p>
+          </div>
+        )}
+
+        {(phase === "form" || phase === "generating") && (
+          <div className="space-y-4">
+            <ResumeForm
+              value={resumeData}
+              onChange={setResumeData}
+              onSubmit={onGenerateFromForm}
+              onBack={backToUpload}
+              warnings={parseWarnings}
+              submitting={phase === "generating"}
+            />
+            {error && (
+              <div className="mx-auto max-w-3xl rounded-xl border border-red-900/70 bg-red-950/50 px-4 py-3 text-sm text-red-200">
+                {error}
+              </div>
+            )}
+            {phase === "generating" && progressMessage && (
+              <div className="mx-auto max-w-3xl rounded-xl border border-emerald-900/60 bg-emerald-950/30 px-4 py-3 text-sm text-emerald-200">
+                {progressMessage}
+              </div>
+            )}
+          </div>
+        )}
+
+        {phase === "upload" && (
           <div className="space-y-12">
             <section
               className="relative overflow-hidden rounded-3xl border border-zinc-800/80 bg-gradient-to-b from-zinc-900/90 to-zinc-950 px-6 py-12 md:px-10 md:py-16"
@@ -497,7 +611,9 @@ export default function Home() {
               />
             </div>
           </div>
-        ) : (
+        )}
+
+        {phase === "result" && result && (
           <div className="space-y-6">
             {(result.pdf_page_count != null ||
               result.one_page_enforced ||
