@@ -47,11 +47,22 @@ from resume_service.routers._helpers import (
     repair_json,
 )
 from resume_service.models import (
+    GenerateFromStructuredBody,
     GenerateJsonBody,
     GenerateResponse,
     PagePolicy,
+    ParseResponse,
 )
 from resume_service.services.pdf_service import extract_text
+from resume_service.services.resume_parse_service import (
+    ParseError,
+    extract_resume_data,
+)
+from features.generation.structured_resume import (
+    parse_resume_data,
+    resume_data_to_source_text,
+)
+from pydantic import ValidationError as PydValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -1016,3 +1027,91 @@ async def resume_generate_stream(
 def resume_preview(resume_id: str):
     """Placeholder for future result persistence and preview by ID."""
     raise HTTPException(status_code=501, detail="Not implemented yet")
+
+
+# ---------------------------------------------------------------------------
+# Verify-parse stage (gated by FEATURE_PARSE_REVIEW)
+# ---------------------------------------------------------------------------
+
+
+def _require_parse_review_feature() -> None:
+    if not settings.feature_parse_review:
+        raise HTTPException(status_code=404, detail="Parse-review feature is disabled")
+
+
+@router.post("/resume/parse", response_model=ParseResponse)
+async def resume_parse(
+    file: UploadFile | None = File(None),
+    text: str | None = Form(None),
+    contact_email: str | None = Form(None),
+    contact_linkedin: str | None = Form(None),
+    contact_phone: str | None = Form(None),
+):
+    """Extract structured resume_data from upload or text. No rewriting.
+
+    Returns the verbatim parse for the verify-parse form. Improvement happens
+    later via /resume/generate-from-structured.
+    """
+    _require_parse_review_feature()
+    if not settings.openai_api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="OPENAI_API_KEY is not set. Copy api/.env.example to api/.env.",
+        )
+
+    raw = await _read_resume_source(file, text)
+    raw = _append_contact_hints(
+        raw,
+        contact_email=contact_email,
+        contact_linkedin=contact_linkedin,
+        contact_phone=contact_phone,
+    )
+
+    client = OpenAI(api_key=settings.openai_api_key)
+    try:
+        resume_data, warnings = extract_resume_data(client, raw)
+    except ParseError as e:
+        raise HTTPException(
+            status_code=502,
+            detail={"error": "resume_parse_failed", "schema_errors": e.errors},
+        ) from e
+    except Exception as e:
+        logger.exception("Parse LLM error")
+        raise HTTPException(status_code=502, detail=str(e)) from e
+
+    return ParseResponse(
+        resume_data=resume_data.model_dump(),
+        parse_warnings=warnings,
+    )
+
+
+@router.post("/resume/generate-from-structured")
+def resume_generate_from_structured(body: GenerateFromStructuredBody):
+    """Take user-edited resume_data, serialize to RESUME SOURCE text, run normal pipeline.
+
+    Streams NDJSON exactly like /generate-stream — the improvement loop
+    (compile / one-page / density / ATS) is unchanged.
+    """
+    _require_parse_review_feature()
+    if not settings.openai_api_key:
+        raise HTTPException(status_code=503, detail="OPENAI_API_KEY not set")
+
+    try:
+        rd = parse_resume_data(body.resume_data)
+    except PydValidationError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "resume_data_invalid", "errors": e.errors()},
+        ) from e
+
+    raw = resume_data_to_source_text(rd)
+
+    def ndjson_iter():
+        try:
+            for ev in iterate_generate_progress(raw, body.page_policy):
+                yield (json.dumps(ev, ensure_ascii=False) + "\n").encode("utf-8")
+        except HTTPException as he:
+            err = {"type": "error", "detail": str(he.detail), "status_code": he.status_code}
+            yield (json.dumps(err, ensure_ascii=False) + "\n").encode("utf-8")
+
+    return StreamingResponse(ndjson_iter(), media_type="application/x-ndjson; charset=utf-8")

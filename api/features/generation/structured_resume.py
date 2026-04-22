@@ -294,6 +294,92 @@ def render_skills(sk: SkillsBlock) -> str:
     )
 
 
+def resume_data_to_source_text(data: ResumeData) -> str:
+    """Serialize ResumeData → plain RESUME SOURCE text the generator LLM expects.
+
+    Round-trip-friendly: preserves every bullet, date, title, and skill so the
+    downstream pipeline sees the user's edits without a JSON-aware fast path.
+    """
+    lines: list[str] = []
+
+    h = data.header
+    if h.name.strip():
+        lines.append(f"NAME: {h.name.strip()}")
+    if h.email.strip():
+        lines.append(f"EMAIL: {h.email.strip()}")
+    if h.phone.strip():
+        lines.append(f"PHONE: {h.phone.strip()}")
+    visible_links = [
+        link for link in h.links if (link.label or "").strip() and (link.url or "").strip()
+    ]
+    if visible_links:
+        lines.append("LINKS:")
+        for link in visible_links:
+            lines.append(f"- {link.label.strip()}: {link.url.strip()}")
+
+    if data.education:
+        lines.append("")
+        lines.append("=== EDUCATION ===")
+        for edu in data.education:
+            if edu.school.strip():
+                lines.append(f"School: {edu.school.strip()}")
+            if edu.degree.strip():
+                lines.append(f"Degree: {edu.degree.strip()}")
+            if edu.date.strip():
+                lines.append(f"Date: {edu.date.strip()}")
+            if edu.location.strip():
+                lines.append(f"Location: {edu.location.strip()}")
+            for b in edu.bullets:
+                if isinstance(b, str) and b.strip():
+                    lines.append(f"- {b.strip()}")
+            lines.append("")
+
+    if data.experience:
+        lines.append("=== EXPERIENCE ===")
+        for exp in data.experience:
+            if exp.company.strip():
+                lines.append(f"Company: {exp.company.strip()}")
+            if exp.title.strip():
+                lines.append(f"Title: {exp.title.strip()}")
+            if exp.date.strip():
+                lines.append(f"Date: {exp.date.strip()}")
+            if exp.location.strip():
+                lines.append(f"Location: {exp.location.strip()}")
+            for b in exp.bullets:
+                if isinstance(b, str) and b.strip():
+                    lines.append(f"- {b.strip()}")
+            lines.append("")
+
+    if data.projects:
+        lines.append("=== PROJECTS ===")
+        for proj in data.projects:
+            if proj.name.strip():
+                lines.append(f"Name: {proj.name.strip()}")
+            if proj.tech_line.strip():
+                lines.append(f"Tech: {proj.tech_line.strip()}")
+            if proj.date.strip():
+                lines.append(f"Date: {proj.date.strip()}")
+            for b in proj.bullets:
+                if isinstance(b, str) and b.strip():
+                    lines.append(f"- {b.strip()}")
+            lines.append("")
+
+    sk = data.skills
+    sk_langs = [s.strip() for s in sk.languages if isinstance(s, str) and s.strip()]
+    sk_fws = [s.strip() for s in sk.frameworks if isinstance(s, str) and s.strip()]
+    sk_tools = [s.strip() for s in sk.tools if isinstance(s, str) and s.strip()]
+    if sk_langs or sk_fws or sk_tools:
+        lines.append("=== SKILLS ===")
+        if sk_langs:
+            lines.append(f"Languages: {', '.join(sk_langs)}")
+        if sk_fws:
+            lines.append(f"Frameworks: {', '.join(sk_fws)}")
+        if sk_tools:
+            lines.append(f"Tools: {', '.join(sk_tools)}")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def build_latex_document(data: ResumeData, *, preamble: str | None = None) -> str:
     """Full .tex file: fixed preamble + deterministic body."""
     pre = (preamble if preamble is not None else _load_preamble()).rstrip()

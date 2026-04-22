@@ -830,6 +830,56 @@ Update preview_sections and coaching to stay aligned with the corrected resume_d
 """
 
 
+# =============================================================================
+# 5) PARSER — extract structured resume_data from raw text (verify-parse stage)
+# =============================================================================
+
+PARSER_SYSTEM = """You are a resume **extraction** engine. You do not write, rewrite, summarize, or improve resumes — you only read raw text and emit structured JSON.
+
+Strict rules:
+- Output must be one valid JSON object only (no markdown fences).
+- The object must have exactly one top-level key: resume_data — matching the schema in the user message.
+- Do NOT output LaTeX, markdown, commentary, preview_sections, coaching, or any other key.
+- **Copy fields verbatim** from the source text. Preserve the user's wording, casing, punctuation, ordering, and bullet count.
+- **Do NOT invent** employers, dates, metrics, technologies, schools, projects, locations, links, or bullets.
+- **Do NOT rewrite** bullets to be punchier, shorter, or more "ATS-friendly" — that is a downstream stage.
+- Empty string ("") for missing scalar fields. Empty array ([]) for missing list fields.
+- Bullets are plain strings — strip leading bullet glyphs (•, -, *, →) and surrounding whitespace, but keep the sentence intact.
+- Group skills by the source's own categories where possible (Languages / Frameworks / Tools); if the source uses other categories, place items in the closest bucket and do not drop any.
+- If the source has a USER-SUPPLIED CONTACT block, those values override anything else for header.email / header.phone / header.links.
+- Do NOT split one source bullet into multiple bullets, and do NOT merge two source bullets into one.
+- ASCII output preferred for visible prose; preserve Unicode only if it is clearly meaningful (e.g., a name with accents).
+"""
+
+
+def parser_system() -> str:
+    return PARSER_SYSTEM.strip() + "\n"
+
+
+def build_parse_user_message(raw: str) -> str:
+    """Parser user message: schema reference + raw resume text. No policies, no LaTeX shape."""
+    schema_ref = resume_data_json_schema_reference()
+    parts = [
+        "TASK: Extract structured resume data from --- RESUME SOURCE --- below.",
+        "Return ONE JSON object with exactly one key: resume_data.",
+        "",
+        "Verbatim copy. No rewriting. No invention. Empty strings / arrays for missing fields.",
+        "",
+        "=== resume_data SCHEMA (Pydantic-generated; obey field names, types, and required keys) ===",
+        schema_ref,
+        "",
+        "=== TARGET SHAPE (concrete example for orientation only — do not copy values) ===",
+        STRUCTURED_RESUME_SCHEMA.strip(),
+        "",
+        "OUTPUT FORMAT:",
+        '{ "resume_data": { ... } }',
+        "",
+        "--- RESUME SOURCE ---",
+        raw.strip() if raw else "(empty)",
+    ]
+    return "\n".join(parts).strip() + "\n"
+
+
 def revision_user_fix_ats_structured(*, resume_data: dict, ats_issue: str) -> str:
     payload = json.dumps(resume_data, ensure_ascii=False, indent=2)
     if len(payload) > 100_000:

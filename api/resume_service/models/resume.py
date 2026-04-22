@@ -37,3 +37,17 @@ class GenerateJsonBody(BaseModel):
     contact_email: str = ""
     contact_linkedin: str = ""
     contact_phone: str = ""
+
+
+class ParseResponse(BaseModel):
+    """Result of POST /resume/parse — verify-parse stage feeds the editable form."""
+
+    resume_data: dict[str, Any]
+    parse_warnings: list[str] = Field(default_factory=list)
+
+
+class GenerateFromStructuredBody(BaseModel):
+    """Body for POST /resume/generate-from-structured — user-edited structured form."""
+
+    resume_data: dict[str, Any]
+    page_policy: PagePolicy = "strict_one_page"

@@ -9,6 +9,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 make setup          # uv sync --dev + npm install + docker build (all-in-one)
 ```
 
+### Run both servers
+```bash
+make dev           # API (:8000) + Web (:3000) concurrently; Ctrl-C stops both
+```
+
 ### Backend (FastAPI)
 ```bash
 cd api && uv sync --dev
@@ -98,6 +103,9 @@ User input (text / PDF upload)
 | `api/resume_service/routers/health.py` | GET /health |
 | `api/resume_service/routers/compile.py` | POST /compile, /compile-pdf |
 | `api/resume_service/routers/resume.py` | POST /generate, /generate-stream, /generate-json-stream + pipeline |
+| `api/resume_service/routers/coaching.py` | Per-section coaching notes endpoint |
+| `api/resume_service/routers/resume_score.py` | Resume scoring endpoint |
+| `api/resume_service/routers/resume_review.py` | PDF annotation review (inline highlights on PDF) |
 | `api/resume_service/routers/_helpers.py` | Shared models (GenerateResponse, etc.), coerce/repair helpers |
 | `api/features/generation/prompts.py` | All LLM system/user prompts (generator, fixer, densify, ATS checker) |
 | `api/features/generation/structured_resume.py` | Optional Pydantic schema + LaTeX builder (`RESUME_STRUCTURED_LATEX=true`) |
@@ -127,6 +135,13 @@ User input (text / PDF upload)
 ### Core-protected paths (CI blocks PRs without `allow-core-change` label)
 - `api/features/pdf_rendering/compile_pdf.py`
 - `api/features/pdf_rendering/dhruv_preamble.tex`
+
+Source of truth: `.github/core-protected-paths.txt` (enforced by `.github/workflows/core-protection.yml`). Update that file when the protected set changes. `.cursor/rules/*.mdc` mirrors the governance rules above — keep in sync with this file.
+
+### Further reading
+- `docs/AI_GOVERNANCE.md` — full governance policy
+- `docs/ENGINEERING_NOTES.md` — deeper architecture/operational notes
+- `docs/FEATURE_BRANCHES.md` — branch workflow
 
 ### Environment variables (key ones)
 | Var | Default | Effect |
