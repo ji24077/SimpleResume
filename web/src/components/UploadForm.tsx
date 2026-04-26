@@ -70,15 +70,15 @@ export default function UploadForm({
         className="mt-4 w-full resize-y rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
       />
       <div className="mt-6 space-y-3 rounded-xl border border-zinc-800 bg-zinc-950/50 px-4 py-4">
-        <p className="text-xs font-medium text-zinc-400">연락처 (붙여넣기 시 권장)</p>
+        <p className="text-xs font-medium text-zinc-400">Contact (recommended when pasting)</p>
         <p className="text-xs text-zinc-500">
-          원문에 이메일·LinkedIn이 분명하지 않으면 생성 전에 입력을 요청합니다. 파일 업로드(PDF 등)일 때는
-          검사를 건너뜁니다.
+          If your pasted text doesn&apos;t clearly include an email and LinkedIn URL, we&apos;ll ask for them
+          before generating. Skipped for file uploads (PDF, etc.).
         </p>
         <input
           type="email"
           autoComplete="email"
-          placeholder="이메일 (예: you@school.edu)"
+          placeholder="Email (e.g. you@school.edu)"
           value={contactEmail}
           onChange={(e) => setContactEmail(e.target.value)}
           className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
@@ -94,14 +94,14 @@ export default function UploadForm({
         <input
           type="tel"
           autoComplete="tel"
-          placeholder="전화 (선택)"
+          placeholder="Phone (optional)"
           value={contactPhone}
           onChange={(e) => setContactPhone(e.target.value)}
           className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
         />
       </div>
       <div className="mt-6 space-y-3 rounded-xl border border-zinc-800 bg-zinc-950/50 px-4 py-4">
-        <p className="text-xs font-medium text-zinc-400">페이지 정책</p>
+        <p className="text-xs font-medium text-zinc-400">Page policy</p>
         <label className="flex cursor-pointer items-start gap-3 text-sm text-zinc-300">
           <input
             type="radio"
@@ -111,9 +111,9 @@ export default function UploadForm({
             className="mt-1 accent-emerald-500"
           />
           <span>
-            <strong className="text-zinc-100">1페이지 고정</strong>
+            <strong className="text-zinc-100">Strict one page</strong>
             <span className="mt-0.5 block text-xs text-zinc-500">
-              2페이지 이상이면 서버가 1페이지에 맞게 다시 줄입니다. 진행 메시지가 버튼 위에 표시됩니다.
+              If the draft runs longer than one page, the server tightens it to fit. Progress shows above the button.
             </span>
           </span>
         </label>
@@ -126,9 +126,9 @@ export default function UploadForm({
             className="mt-1 accent-emerald-500"
           />
           <span>
-            <strong className="text-zinc-100">여러 페이지 허용</strong>
+            <strong className="text-zinc-100">Allow multiple pages</strong>
             <span className="mt-0.5 block text-xs text-zinc-500">
-              1페이지 강제 없이 생성만 합니다. 긴 이력서에 적합합니다.
+              Generate without forcing a single page. Better for long resumes.
             </span>
           </span>
         </label>
@@ -148,7 +148,7 @@ export default function UploadForm({
         className="mt-6 w-full rounded-xl bg-emerald-600 py-3 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
       >
         {loading
-          ? progressMessage ?? "생성 중… (30–120초 정도 걸릴 수 있습니다)"
+          ? progressMessage ?? "Generating… (this can take 30–120 seconds)"
           : "Generate resume"}
       </button>
     </div>

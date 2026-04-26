@@ -105,7 +105,6 @@ def _run_checker_llm(
 
 def _append_one_page_done_notes(
     log_en: list[str],
-    log_ko: list[str],
     *,
     raw: str,
     layout_underfull: bool | None,
@@ -113,35 +112,25 @@ def _append_one_page_done_notes(
 ) -> None:
     if density_max <= 0:
         log_en.append("Full-page density expand is off (RESUME_DENSITY_EXPAND_MAX=0).")
-        log_ko.append("한 페이지 밀도 자동 보강이 꺼져 있습니다 (RESUME_DENSITY_EXPAND_MAX=0).")
     if layout_underfull is True:
         log_en.append(
             "Bottom may still look empty: if the draft had little to add (bullets, metrics, projects), "
             "the resume stays shorter or relaxed on purpose — we do not invent achievements."
-        )
-        log_ko.append(
-            "원문에 추가할 불릿·수치·프로젝트가 없으면 짧게·여유 있게 끝난 것일 수 있습니다. 허위 내용은 넣지 않습니다."
         )
     elif layout_underfull is None and density_max > 0:
         log_en.append(
             "PDF bottom density was not measured; install Poppler (pdftoppm) + Pillow and set "
             "pdf_density_check_ready true in /health."
         )
-        log_ko.append(
-            "PDF 하단 밀도를 재지 못했습니다. Poppler(pdftoppm)·Pillow 설치 후 /health 에서 pdf_density_check_ready 를 확인하세요."
-        )
     if len(raw.strip()) < 1200:
         log_en.append("Source text is short; richer input usually fills one page better.")
-        log_ko.append("원문이 짧습니다. 내용을 더 넣으면 한 페이지가 더 자연스럽게 채워집니다.")
 
 
-def _progress_event(log_ko: list[str], log_en: list[str]) -> dict[str, Any]:
+def _progress_event(log_en: list[str]) -> dict[str, Any]:
     return {
         "type": "progress",
-        "message": log_ko[-1],
-        "message_en": log_en[-1],
-        "log_ko": list(log_ko),
-        "log_en": list(log_en),
+        "message": log_en[-1],
+        "log": list(log_en),
     }
 
 
@@ -187,12 +176,10 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
     if structured:
         user_msg += "Structured mode: revisions adjust **resume_data** JSON only; never output LaTeX.\n"
 
-    log_ko: list[str] = []
     log_en: list[str] = []
 
     log_en.append("Calling the model (first pass)…")
-    log_ko.append("AI가 이력서 초안을 생성하고 있습니다…")
-    yield _progress_event(log_ko, log_en)
+    yield _progress_event(log_en)
 
     try:
         completion = client.chat.completions.create(
@@ -224,18 +211,15 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
         client=client,
         fixer_sys=fixer_sys,
         log_en=log_en,
-        log_ko=log_ko,
     )
     latex = resp.latex_document
 
     log_en.append("Draft ready; applying checks…")
-    log_ko.append("초안이 준비되었습니다. 검사를 진행합니다…")
-    yield _progress_event(log_ko, log_en)
+    yield _progress_event(log_en)
 
     if page_policy == "allow_multi":
         log_en.append("Multiple pages allowed — skipping strict 1-page enforcement.")
-        log_ko.append("여러 페이지 허용 모드입니다. 1페이지 강제를 적용하지 않습니다.")
-        yield _progress_event(log_ko, log_en)
+        yield _progress_event(log_en)
         pdf, err_detail = compile_latex_to_pdf(latex)
         am_compile_budget = 2
         if not pdf:
@@ -248,11 +232,7 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                     f"PDF compile failed; asking model to fix LaTeX "
                     f"({2 - am_compile_budget}/2)…"
                 )
-                log_ko.append(
-                    "PDF 컴파일 실패 — 모델에 LaTeX 오류 수정을 요청합니다… "
-                    f"({2 - am_compile_budget}/2)"
-                )
-                yield _progress_event(log_ko, log_en)
+                yield _progress_event(log_en)
                 rev_user = (
                     revision_user_fix_compile_structured(
                         resume_data=resume_data_state,
@@ -290,14 +270,12 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                 reason = data.get("reason")
                 if isinstance(reason, str) and reason.strip():
                     log_en.append(f"Compile-fix note: {reason.strip()[:500]}")
-                    log_ko.append(f"컴파일 수정: {reason.strip()[:500]}")
                 _inject_preview_coaching_from_previous(data, resp)
                 resp, blob = _coerce_any_response(
                     data,
                     client=client,
                     fixer_sys=fixer_sys,
                     log_en=log_en,
-                    log_ko=log_ko,
                 )
                 if blob is not None:
                     resume_data_state = blob
@@ -311,21 +289,17 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
         pc = _count_pdf_pages(pdf) if pdf else None
         if not pdf:
             log_en.append("Server PDF compile failed; page count unknown.")
-            log_ko.append("서버에서 PDF 컴파일에 실패했습니다. 페이지 수를 확인하지 못했습니다.")
         else:
             log_en.append(f"Server PDF: {pc} page(s).")
-            log_ko.append(f"서버 PDF 기준 {pc}페이지입니다.")
-        yield _progress_event(log_ko, log_en)
+        yield _progress_event(log_en)
         ats_ic = ats_smoke_test(pdf) if pdf else None
         if ats_ic:
             log_en.append(f"ATS smoke (informational): {ats_ic}")
-            log_ko.append(f"ATS 스모크(참고): {ats_ic}")
-            yield _progress_event(log_ko, log_en)
+            yield _progress_event(log_en)
         q_issues: list[dict[str, Any]] | None = None
         if pdf and settings.resume_quality_checker:
             log_en.append("Running quality checker (diagnostic only)…")
-            log_ko.append("품질 점검(진단만)을 실행합니다…")
-            yield _progress_event(log_ko, log_en)
+            yield _progress_event(log_en)
             q_issues = _run_checker_llm(client, checker_sys, latex)
         final = resp.model_copy(
             update={
@@ -333,7 +307,6 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                 "one_page_enforced": False,
                 "page_policy_applied": page_policy,
                 "revision_log": list(log_en),
-                "revision_log_ko": list(log_ko),
                 "pdf_layout_underfull": None,
                 "density_expand_rounds": 0,
                 "ats_issue_code": ats_ic,
@@ -346,15 +319,13 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
     max_rev = settings.resume_one_page_max_revisions
     if max_rev <= 0:
         log_en.append("1-page enforcement is off (RESUME_ONE_PAGE_MAX_REVISIONS=0).")
-        log_ko.append("1페이지 강제가 설정에서 꺼져 있습니다.")
-        yield _progress_event(log_ko, log_en)
+        yield _progress_event(log_en)
         final = resp.model_copy(
             update={
                 "pdf_page_count": None,
                 "one_page_enforced": False,
                 "page_policy_applied": page_policy,
                 "revision_log": list(log_en),
-                "revision_log_ko": list(log_ko),
                 "pdf_layout_underfull": None,
                 "density_expand_rounds": 0,
             }
@@ -380,7 +351,6 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
             "one_page_enforced": one_page_enforced,
             "page_policy_applied": page_policy,
             "revision_log": list(log_en),
-            "revision_log_ko": list(log_ko),
             "pdf_layout_underfull": layout_underfull,
             "density_expand_rounds": density_rounds,
             "ats_issue_code": ats_issue_code,
@@ -390,8 +360,7 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
     while True:
         for attempt in range(max_rev + 1):
             log_en.append("Compiling PDF to verify page count…")
-            log_ko.append("PDF를 컴파일해 페이지 수를 확인하는 중입니다…")
-            yield _progress_event(log_ko, log_en)
+            yield _progress_event(log_en)
 
             pdf, err_detail = compile_latex_to_pdf(latex)
             if not pdf:
@@ -406,11 +375,7 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                         f"PDF compile failed; asking model to fix LaTeX (compile-fix "
                         f"{2 - compile_fix_budget}/2)…"
                     )
-                    log_ko.append(
-                        "PDF 컴파일 실패 — 모델에 LaTeX 오류 수정을 요청합니다… "
-                        f"({2 - compile_fix_budget}/2)"
-                    )
-                    yield _progress_event(log_ko, log_en)
+                    yield _progress_event(log_en)
                     rev_user = (
                         revision_user_fix_compile_structured(
                             resume_data=resume_data_state,
@@ -449,14 +414,12 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                     reason = data.get("reason")
                     if isinstance(reason, str) and reason.strip():
                         log_en.append(f"Compile-fix note: {reason.strip()[:500]}")
-                        log_ko.append(f"컴파일 수정: {reason.strip()[:500]}")
                     _inject_preview_coaching_from_previous(data, resp)
                     resp, blob = _coerce_any_response(
                         data,
                         client=client,
                         fixer_sys=fixer_sys,
                         log_en=log_en,
-                        log_ko=log_ko,
                     )
                     if blob is not None:
                         resume_data_state = blob
@@ -475,8 +438,7 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                     (err_detail or {}).get("code", err_detail),
                 )
                 log_en.append("PDF compile failed on server; cannot verify or enforce 1 page.")
-                log_ko.append("서버 PDF 컴파일 실패 — 1페이지 여부를 확인·강제할 수 없습니다.")
-                yield _progress_event(log_ko, log_en)
+                yield _progress_event(log_en)
                 final = resp.model_copy(
                     update=_finish_fields(
                         pdf_page_count=None,
@@ -496,8 +458,7 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                         max_rev,
                     )
                     log_en.append(f"Still {pages} page(s) after maximum revisions.")
-                    log_ko.append(f"최대 수정 후에도 {pages}페이지입니다.")
-                    yield _progress_event(log_ko, log_en)
+                    yield _progress_event(log_en)
                     final = resp.model_copy(
                         update=_finish_fields(pdf_page_count=pages, one_page_enforced=False, layout_underfull=None)
                     )
@@ -508,17 +469,11 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                     f"Detected {pages} page(s) — lightly tightening to fit 1 page "
                     f"(keep all source facts; revision {attempt + 1}/{max_rev})…"
                 )
-                line_ko = (
-                    f"{pages}페이지입니다. 원본 정보는 유지한 채 문장·여백만 조여 1페이지에 맞춥니다… "
-                    f"({attempt + 1}/{max_rev}차)"
-                )
                 log_en.append(line_en)
-                log_ko.append(line_ko)
-                yield _progress_event(log_ko, log_en)
+                yield _progress_event(log_en)
 
                 log_en.append("Asking the model for a mild trim (wording / spacing; preserve all source content)…")
-                log_ko.append("모델에 문장·여백 위주로 살짝 줄이기를 요청합니다 (원본 정보 삭제·누락 지양)…")
-                yield _progress_event(log_ko, log_en)
+                yield _progress_event(log_en)
 
                 rev_user = (
                     revision_user_fit_one_page_structured(
@@ -557,7 +512,6 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                     client=client,
                     fixer_sys=fixer_sys,
                     log_en=log_en,
-                    log_ko=log_ko,
                 )
                 if blob is not None:
                     resume_data_state = blob
@@ -567,8 +521,7 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
             layout_underfull: bool | None = None
             if density_max > 0:
                 log_en.append("Checking PDF for underfull bottom (layout density)…")
-                log_ko.append("PDF 하단 여백(밀도)을 검사하는 중입니다…")
-                yield _progress_event(log_ko, log_en)
+                yield _progress_event(log_en)
                 mean_lum = pdf_bottom_strip_mean_luminance(
                     pdf,
                     bottom_fraction=settings.resume_underfull_bottom_frac,
@@ -579,10 +532,7 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                         f"Bottom strip mean luminance (0-255, bottom {settings.resume_underfull_bottom_frac:.0%}): "
                         f"{mean_lum:.1f}"
                     )
-                    log_ko.append(
-                        f"하단 {settings.resume_underfull_bottom_frac:.0%} 구간 평균 밝기(0-255): {mean_lum:.1f}"
-                    )
-                    yield _progress_event(log_ko, log_en)
+                    yield _progress_event(log_en)
                 if mean_lum is None:
                     layout_underfull = None
                 elif settings.resume_underfull_golden_mean is not None:
@@ -594,16 +544,13 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
 
                 if layout_underfull is None:
                     log_en.append("Density check unavailable (install poppler `pdftoppm` + Pillow).")
-                    log_ko.append("밀도 검사 생략: `pdftoppm`(Poppler)과 Pillow를 설치하면 하단 여백을 감지합니다.")
-                    yield _progress_event(log_ko, log_en)
+                    yield _progress_event(log_en)
                 elif layout_underfull:
                     log_en.append("Layout looks underfull (large bottom whitespace).")
-                    log_ko.append("하단에 빈 공간이 많아 보입니다.")
-                    yield _progress_event(log_ko, log_en)
+                    yield _progress_event(log_en)
                 else:
                     log_en.append("Layout density OK on one page.")
-                    log_ko.append("1페이지 밀도가 적당해 보입니다.")
-                    yield _progress_event(log_ko, log_en)
+                    yield _progress_event(log_en)
 
             if layout_underfull is not True:
                 ats_issue_code = ats_smoke_test(pdf)
@@ -611,8 +558,7 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                     log_en.append(
                         f"ATS smoke: {ats_issue_code} (no auto-fix for this code)."
                     )
-                    log_ko.append(f"ATS 스모크: {ats_issue_code} (이 코드는 자동 수정 안 함).")
-                    yield _progress_event(log_ko, log_en)
+                    yield _progress_event(log_en)
                 if (
                     settings.resume_ats_fix_max > 0
                     and should_autofix_ats(ats_issue_code)
@@ -621,10 +567,7 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                         log_en.append(
                             "ATS auto-fix skipped: missing structured resume_data state."
                         )
-                        log_ko.append(
-                            "ATS 자동 수정 생략: 구조화 resume_data 상태가 없습니다."
-                        )
-                        yield _progress_event(log_ko, log_en)
+                        yield _progress_event(log_en)
                     else:
                         ats_left = settings.resume_ats_fix_max
                         latex_snap, pdf_snap, resp_snap = latex, pdf, resp
@@ -638,11 +581,7 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                                 f"ATS auto-fix ({mode}) ({fix_idx}/{settings.resume_ats_fix_max}): "
                                 f"{cur_issue}…"
                             )
-                            log_ko.append(
-                                f"ATS 자동 수정 ({mode}) ({fix_idx}/{settings.resume_ats_fix_max}): "
-                                f"{cur_issue}…"
-                            )
-                            yield _progress_event(log_ko, log_en)
+                            yield _progress_event(log_en)
                             if structured:
                                 rev_user = revision_user_fix_ats_structured(
                                     resume_data=resume_data_state,
@@ -684,7 +623,6 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                                         client=client,
                                         fixer_sys=fixer_sys,
                                         log_en=log_en,
-                                        log_ko=log_ko,
                                     )
                                     if blob_try is not None:
                                         resume_data_state = blob_try
@@ -714,18 +652,14 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                                 log_en.append(
                                     f"ATS after fix: {cur_issue} (stopping auto-fix)."
                                 )
-                                log_ko.append(
-                                    f"ATS 수정 후: {cur_issue} (자동 수정 중단)."
-                                )
-                                yield _progress_event(log_ko, log_en)
+                                yield _progress_event(log_en)
                                 break
 
                 ats_issue_code = ats_smoke_test(pdf)
                 q_issues: list[dict[str, Any]] | None = None
                 if settings.resume_quality_checker:
                     log_en.append("Running quality checker (diagnostic only)…")
-                    log_ko.append("품질 점검(진단만)을 실행합니다…")
-                    yield _progress_event(log_ko, log_en)
+                    yield _progress_event(log_en)
                     q_issues = _run_checker_llm(client, checker_sys, latex)
 
                 try:
@@ -734,18 +668,16 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                     pass
 
                 log_en.append(f"PDF fits on {pages} page(s). Done.")
-                log_ko.append(f"PDF는 {pages}페이지입니다. 완료되었습니다.")
-                yield _progress_event(log_ko, log_en)
+                yield _progress_event(log_en)
                 _n = len(log_en)
                 _append_one_page_done_notes(
                     log_en,
-                    log_ko,
                     raw=raw,
                     layout_underfull=layout_underfull,
                     density_max=density_max,
                 )
                 if len(log_en) > _n:
-                    yield _progress_event(log_ko, log_en)
+                    yield _progress_event(log_en)
                 final = resp.model_copy(
                     update=_finish_fields(
                         pdf_page_count=pages,
@@ -760,18 +692,16 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
 
             if expand_left <= 0:
                 log_en.append("Underfull but max density-expand rounds reached; returning as-is.")
-                log_ko.append("하단이 비었지만 추가 채움 횟수를 모두 썼습니다. 현재 버전으로 마칩니다.")
-                yield _progress_event(log_ko, log_en)
+                yield _progress_event(log_en)
                 _n = len(log_en)
                 _append_one_page_done_notes(
                     log_en,
-                    log_ko,
                     raw=raw,
                     layout_underfull=True,
                     density_max=density_max,
                 )
                 if len(log_en) > _n:
-                    yield _progress_event(log_ko, log_en)
+                    yield _progress_event(log_en)
                 ats_ic = ats_smoke_test(pdf)
                 q_done: list[dict[str, Any]] | None = None
                 if settings.resume_quality_checker:
@@ -791,8 +721,7 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
             expand_left -= 1
             density_rounds += 1
             log_en.append(f"Densifying layout (round {density_rounds}/{density_max})…")
-            log_ko.append(f"한 페이지를 꽉 채우도록 내용을 보강합니다… ({density_rounds}/{density_max}차)")
-            yield _progress_event(log_ko, log_en)
+            yield _progress_event(log_en)
 
             rev_user = (
                 revision_user_densify_structured(resume_data=resume_data_state)
@@ -829,7 +758,6 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                 client=client,
                 fixer_sys=fixer_sys,
                 log_en=log_en,
-                log_ko=log_ko,
             )
             if blob is not None:
                 resume_data_state = blob
@@ -933,7 +861,7 @@ async def generate_stream(
     contact_linkedin: str | None = Form(None),
     contact_phone: str | None = Form(None),
 ):
-    """NDJSON stream: `progress` events (Korean `message`, English `message_en`) then `result` or `error`."""
+    """NDJSON stream: `progress` events (English `message`) then `result` or `error`."""
     if not settings.openai_api_key:
         raise HTTPException(
             status_code=503,

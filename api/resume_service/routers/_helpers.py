@@ -164,7 +164,6 @@ def _structured_coerce_pipeline(
     data: dict[str, Any],
     fixer_sys: str,
     log_en: list[str],
-    log_ko: list[str],
 ) -> tuple[GenerateResponse, dict[str, Any]]:
     work = data
     max_h = settings.resume_schema_heal_max if client is not None else 0
@@ -183,9 +182,6 @@ def _structured_coerce_pipeline(
             log_en.append(
                 f"resume_data failed validation; schema self-heal ({attempt + 1}/{max_h})…"
             )
-            log_ko.append(
-                f"스키마 검증 실패 — resume_data 자동 수정 중 ({attempt + 1}/{max_h})…"
-            )
             work = _llm_fix_resume_schema(
                 client, fixer_sys, e.model_response, e.errors
             )
@@ -198,13 +194,12 @@ def _coerce_any_response(
     client: OpenAI | None = None,
     fixer_sys: str = "",
     log_en: list[str] | None = None,
-    log_ko: list[str] | None = None,
 ) -> tuple[GenerateResponse, dict[str, Any] | None]:
     if not settings.resume_structured_latex:
         return _coerce_latex_document_response(data), None
     fs = fixer_sys.strip() or structured_fixer_system()
-    le, lk = log_en or [], log_ko or []
-    return _structured_coerce_pipeline(client, data, fs, le, lk)
+    le = log_en or []
+    return _structured_coerce_pipeline(client, data, fs, le)
 
 
 def _coerce_generate_response(data: dict[str, Any]) -> GenerateResponse:

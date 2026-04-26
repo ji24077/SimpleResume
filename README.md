@@ -10,7 +10,7 @@ Stack: **Next.js** (UI + API proxy) · **FastAPI** · **OpenAI API**
 - Node 20+
 - Python 3.11+
 - OpenAI API key
-- **Docker Desktop** (PDF 미리보기 — Overleaf와 같은 TeX Live full + `latexmk`; 기본 설정이 Docker 전용)
+- **Docker Desktop** (PDF preview — Overleaf-grade TeX Live full + `latexmk`; default config is Docker-only)
 
 ## Quick Start
 
@@ -85,10 +85,10 @@ make test-golden  # frozen-fixture regression tests
 
 Check `GET http://127.0.0.1:8000/health` → `pdf_compile`, `compiler.latex_docker_ready`.
 
-## Docs (구현·엣지케이스)
+## Docs (implementation · edge cases)
 
-- **[docs/ENGINEERING_NOTES.md](docs/ENGINEERING_NOTES.md)** — 지금까지 구현된 동작, 엣지케이스, 건드리면 안 되는 연관(프롬프트·sanitize·스트림 등).  
-- **[api/OPS_CHECKLIST.md](api/OPS_CHECKLIST.md)** — 운영 시 Poppler/Pillow·밀도 루프 확인용 체크리스트.
+- **[docs/ENGINEERING_NOTES.md](docs/ENGINEERING_NOTES.md)** — currently implemented behavior, edge cases, and the load-bearing dependencies (prompts, sanitize, streaming, etc.) you should not touch lightly.
+- **[api/OPS_CHECKLIST.md](api/OPS_CHECKLIST.md)** — operations checklist for verifying Poppler / Pillow and the density loop.
 
 ## Env
 
