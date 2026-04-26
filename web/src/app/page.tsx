@@ -297,13 +297,13 @@ export default function Home() {
       const { needEmail, needLinkedin } = pasteContactGaps(paste);
       if (needEmail && !contactEmail.trim()) {
         setError(
-          "원문에서 이메일이 잘 안 보입니다. 아래 '연락처'에 이메일을 입력하거나, 원문에 주소를 적어 주세요.",
+          "We couldn't find an email in your pasted text. Add one in the Contact field below, or include it in the pasted text.",
         );
         return;
       }
       if (needLinkedin && !contactLinkedin.trim()) {
         setError(
-          "원문에서 LinkedIn이 잘 안 보입니다. 아래에 프로필 URL을 입력하거나, 원문에 linkedin.com 링크를 넣어 주세요.",
+          "We couldn't find a LinkedIn URL in your pasted text. Add your profile URL below, or include a linkedin.com link in the pasted text.",
         );
         return;
       }
@@ -621,7 +621,7 @@ export default function Home() {
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 {result.page_policy_applied === "allow_multi" && (
                   <span className="rounded-full border border-sky-800/50 bg-sky-950/40 px-3 py-1 text-sky-200/90">
-                    여러 페이지 허용 모드
+                    Multi-page mode
                   </span>
                 )}
                 {result.pdf_page_count != null && (
