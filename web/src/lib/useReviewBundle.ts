@@ -36,15 +36,31 @@ const EMPTY: ReviewBundle = {
   reviewStatus: "idle",
 };
 
+const KIND_LABEL: Record<string, string> = {
+  experience: "EXPERIENCE",
+  education: "EDUCATION",
+  project: "PROJECTS",
+  projects: "PROJECTS",
+  skills: "SKILLS",
+  summary: "SUMMARY",
+};
+
 function buildPlainTextResume(g: GenerateResponse): string {
   const parts: string[] = [];
+  let lastLabel = "";
   for (const sec of g.preview_sections) {
-    parts.push(sec.title);
+    const label = KIND_LABEL[sec.kind.toLowerCase()] ?? sec.kind.toUpperCase();
+    if (label !== lastLabel) {
+      parts.push("");
+      parts.push(label);
+      lastLabel = label;
+    }
+    if (sec.title) parts.push(sec.title);
     if (sec.subtitle) parts.push(sec.subtitle);
     for (const b of sec.bullets) parts.push(`- ${b}`);
     parts.push("");
   }
-  return parts.join("\n");
+  return parts.join("\n").trim();
 }
 
 export function useReviewBundle({ generate, rawText }: Args): ReviewBundle {
