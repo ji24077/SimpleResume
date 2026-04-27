@@ -134,6 +134,57 @@ def _progress_event(log_en: list[str]) -> dict[str, Any]:
     }
 
 
+_HEADER_HREF_RE = __import__("re").compile(
+    r"\\href\{([^}]+)\}\{([^}]*)\}", flags=__import__("re").IGNORECASE
+)
+
+
+def _strip_hallucinated_header_links(latex: str, raw: str) -> str:
+    """Remove header `\\href{URL}{label}` entries whose URL host (or full URL)
+    isn't present in the source. Replaces them with the bare label so the
+    layout doesn't shift but no fabricated link reaches the PDF.
+
+    Only the document head is scanned (everything before the first `\\section`)
+    so body-link macros — which are far less likely to be hallucinated — are
+    untouched.
+    """
+    if not latex or not raw:
+        return latex
+    section_idx = latex.find("\\section")
+    head_end = section_idx if section_idx > 0 else len(latex)
+    raw_lc = raw.lower()
+
+    def replace(m: "__import__('re').Match[str]") -> str:
+        url = m.group(1).strip()
+        label = m.group(2)
+        # mailto: links — keep only if the email appears in source
+        if url.lower().startswith("mailto:"):
+            email = url[7:].strip().lower()
+            return m.group(0) if email and email in raw_lc else label
+        # Strip protocol + path for hostname check
+        host = url.lower()
+        if "://" in host:
+            host = host.split("://", 1)[1]
+        host = host.split("/", 1)[0]
+        if not host:
+            return label
+        if host in raw_lc or url.lower() in raw_lc:
+            return m.group(0)
+        # Allow github/linkedin generic hosts only when the slug also matches
+        slug = ""
+        if "://" in url:
+            tail = url.split("://", 1)[1].split("/", 1)
+            if len(tail) > 1:
+                slug = tail[1].split("/", 1)[0].lower()
+        if slug and slug in raw_lc:
+            return m.group(0)
+        # Hallucinated — keep the label as plain text.
+        return label
+
+    head = _HEADER_HREF_RE.sub(replace, latex[:head_end])
+    return head + latex[head_end:]
+
+
 # ---------------------------------------------------------------------------
 # Core generation pipeline (iterator)
 # ---------------------------------------------------------------------------
@@ -301,6 +352,9 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
             log_en.append("Running quality checker (diagnostic only)…")
             yield _progress_event(log_en)
             q_issues = _run_checker_llm(client, checker_sys, latex)
+        resp = resp.model_copy(
+            update={"latex_document": _strip_hallucinated_header_links(resp.latex_document, raw)}
+        )
         final = resp.model_copy(
             update={
                 "pdf_page_count": pc,
@@ -320,6 +374,9 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
     if max_rev <= 0:
         log_en.append("1-page enforcement is off (RESUME_ONE_PAGE_MAX_REVISIONS=0).")
         yield _progress_event(log_en)
+        resp = resp.model_copy(
+            update={"latex_document": _strip_hallucinated_header_links(resp.latex_document, raw)}
+        )
         final = resp.model_copy(
             update={
                 "pdf_page_count": None,
@@ -439,6 +496,9 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                 )
                 log_en.append("PDF compile failed on server; cannot verify or enforce 1 page.")
                 yield _progress_event(log_en)
+                resp = resp.model_copy(
+                    update={"latex_document": _strip_hallucinated_header_links(resp.latex_document, raw)}
+                )
                 final = resp.model_copy(
                     update=_finish_fields(
                         pdf_page_count=None,
@@ -459,6 +519,9 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                     )
                     log_en.append(f"Still {pages} page(s) after maximum revisions.")
                     yield _progress_event(log_en)
+                    resp = resp.model_copy(
+                        update={"latex_document": _strip_hallucinated_header_links(resp.latex_document, raw)}
+                    )
                     final = resp.model_copy(
                         update=_finish_fields(pdf_page_count=pages, one_page_enforced=False, layout_underfull=None)
                     )
@@ -680,6 +743,9 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                 )
                 if len(log_en) > _n:
                     yield _progress_event(log_en)
+                resp = resp.model_copy(
+                    update={"latex_document": _strip_hallucinated_header_links(resp.latex_document, raw)}
+                )
                 final = resp.model_copy(
                     update=_finish_fields(
                         pdf_page_count=pages,
@@ -708,6 +774,9 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                 q_done: list[dict[str, Any]] | None = None
                 if settings.resume_quality_checker:
                     q_done = _run_checker_llm(client, checker_sys, latex)
+                resp = resp.model_copy(
+                    update={"latex_document": _strip_hallucinated_header_links(resp.latex_document, raw)}
+                )
                 final = resp.model_copy(
                     update=_finish_fields(
                         pdf_page_count=pages,

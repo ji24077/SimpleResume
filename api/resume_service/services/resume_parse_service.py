@@ -78,6 +78,47 @@ def _heal_schema(
     return repair_json(content)
 
 
+def _drop_hallucinated_links(rd: ResumeData, raw: str) -> tuple[ResumeData, int]:
+    """Remove header.links entries whose URL host (or full URL) doesn't appear
+    in the raw source text. The parser LLM occasionally fabricates plausible
+    looking URLs (`davidwang.com`, `github.com/jane`) when none was present;
+    this is the safety net that keeps fake contact info from reaching the PDF.
+    """
+    if not rd.header.links:
+        return rd, 0
+    raw_lc = raw.lower()
+    kept = []
+    dropped = 0
+    for link in rd.header.links:
+        url = (link.url or "").strip()
+        if not url:
+            continue
+        # Strip protocol + path for hostname-only match
+        host = url
+        if "://" in host:
+            host = host.split("://", 1)[1]
+        host = host.split("/", 1)[0].lower()
+        if not host:
+            dropped += 1
+            continue
+        if host in raw_lc or url.lower() in raw_lc:
+            kept.append(link)
+            continue
+        # Allow generic "linkedin.com/in/<slug>" / "github.com/<slug>" only when
+        # the slug also appears in the source.
+        slug = ""
+        if "://" in url:
+            tail = url.split("://", 1)[1].split("/", 1)
+            slug = tail[1].split("/", 1)[0].lower() if len(tail) > 1 else ""
+        if slug and slug in raw_lc:
+            kept.append(link)
+            continue
+        dropped += 1
+    if dropped:
+        rd.header.links = kept
+    return rd, dropped
+
+
 def extract_resume_data(client: OpenAI, raw: str) -> tuple[ResumeData, list[str]]:
     """Extract ``ResumeData`` from raw resume text.
 
@@ -105,7 +146,14 @@ def extract_resume_data(client: OpenAI, raw: str) -> tuple[ResumeData, list[str]
     max_heal = settings.resume_schema_heal_max
     for attempt in range(max_heal + 1):
         try:
-            return parse_resume_data(work), warnings
+            rd_obj = parse_resume_data(work)
+            rd_obj, dropped = _drop_hallucinated_links(rd_obj, raw)
+            if dropped:
+                warnings.append(
+                    f"Dropped {dropped} header link(s) the model made up "
+                    f"(host not found in source)."
+                )
+            return rd_obj, warnings
         except ValidationError as e:
             errors = format_resume_validation_errors(e)
             if attempt >= max_heal:
