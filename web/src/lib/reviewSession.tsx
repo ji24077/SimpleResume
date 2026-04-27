@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { GenerateResponse, PagePolicy, ParseResponse, ResumeData } from "@/lib/types";
 
-const STORAGE_KEY = "resumeroast-session-v1";
+const STORAGE_KEY = "simpleresume-session-v1";
 
 export type ReviewSessionState = {
   sessionId: string | null;

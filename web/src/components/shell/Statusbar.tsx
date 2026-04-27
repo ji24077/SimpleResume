@@ -38,7 +38,7 @@ export default function Statusbar() {
 
   return (
     <div className="statusbar">
-      <span>resumeroast.local · build 0.4.2</span>
+      <span>simpleresume.local · build 0.4.2</span>
       <div className="right">
         <span className={apiOk ? "" : "bad"}>API · {apiOk ? "OK" : "OFF"}</span>
         <span className={openaiOk ? "" : "bad"}>OpenAI · {openaiOk ? "OK" : "OFF"}</span>

@@ -26,9 +26,9 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ResumeRoast — drop a draft, get a roast",
+  title: "SimpleResume — upload your résumé, get it optimized",
   description:
-    "Roast your résumé against 100+ recruiter-tested patterns. ATS-safe rewrites, clean LaTeX, one-page PDF.",
+    "Optimize your résumé against 100+ recruiter-tested patterns. ATS-safe rewrites, clean LaTeX, one-page PDF.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
