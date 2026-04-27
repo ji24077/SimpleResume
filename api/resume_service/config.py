@@ -48,7 +48,7 @@ class Settings(BaseSettings):
 
     feature_pdf_annotations: bool = Field(default=False)
     feature_advanced_diagnostics: bool = Field(default=False)
-    feature_parse_review: bool = Field(default=False)
+    feature_parse_review: bool = Field(default=True)
 
     model_config = SettingsConfigDict(extra="ignore")
 

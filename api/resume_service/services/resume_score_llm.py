@@ -136,6 +136,19 @@ def llm_score_resume(text: str, parsed: ParsedResume, job_description: str = "")
         if "bullets" in data and isinstance(data["bullets"], list):
             result["bullets"] = data["bullets"]
 
+        # Diagnostic: surface "LLM returned nothing useful" cases — usually
+        # malformed JSON shape that still parses but lacks the keys we need.
+        n_bullets = len(result.get("bullets") or [])
+        expected = max(2, len(parsed.roles) if parsed and parsed.roles else 0)
+        if n_bullets < expected:
+            logger.warning(
+                "llm_score_resume sparse response: keys=%s bullets=%d expected~=%d sample=%r",
+                sorted(data.keys()),
+                n_bullets,
+                expected,
+                content[:200],
+            )
+
         return result
 
     except Exception:

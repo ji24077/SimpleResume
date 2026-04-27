@@ -750,6 +750,11 @@ h4 {
   font-style: italic;
 }
 
+/* spin */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 /* skeleton shimmer */
 @keyframes shimmer {
   0% { background-position: -400px 0; }

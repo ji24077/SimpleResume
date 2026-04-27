@@ -84,64 +84,63 @@ export default function PdfPanel({
         </div>
       </div>
 
-      <div style={{ height: 720, transform: `scale(${zoom / 100})`, transformOrigin: "top left", width: `${10000 / zoom}%` }}>
-        {pdfStatus === "loading" && (
-          <div
-            className="card"
-            style={{
-              height: "100%",
-              display: "grid",
-              placeItems: "center",
-              background: "var(--canvas-alt)",
-            }}
-          >
-            <div className="row" style={{ gap: 10 }}>
-              <div
-                className="h-5 w-5 animate-spin rounded-full"
-                style={{
-                  width: 18,
-                  height: 18,
-                  border: "2px solid var(--accent)",
-                  borderTopColor: "transparent",
-                  borderRadius: "50%",
-                }}
-              />
-              <span className="font-mono muted" style={{ fontSize: 12 }}>
-                Compiling PDF…
-              </span>
+      <div style={{ height: 720, overflow: "hidden", display: "flex", justifyContent: "center" }}>
+        <div style={{ width: `${zoom}%`, height: "100%" }}>
+          {pdfStatus === "loading" && (
+            <div
+              className="card"
+              style={{
+                height: "100%",
+                display: "grid",
+                placeItems: "center",
+                background: "var(--canvas-alt)",
+              }}
+            >
+              <div className="row" style={{ gap: 10 }}>
+                <div
+                  style={{
+                    width: 18,
+                    height: 18,
+                    border: "2px solid var(--accent)",
+                    borderTopColor: "transparent",
+                    borderRadius: "50%",
+                    animation: "spin 1s linear infinite",
+                  }}
+                />
+                <span className="font-mono muted" style={{ fontSize: 12 }}>
+                  Compiling PDF…
+                </span>
+              </div>
             </div>
-          </div>
-        )}
-        {pdfStatus === "error" && (
-          <div
-            className="card"
-            style={{
-              padding: 18,
-              background: "var(--error-bg)",
-              borderColor: "transparent",
-              borderLeft: "3px solid var(--error)",
-              color: "var(--error)",
-            }}
-          >
-            {pdfError ?? "PDF compile failed."}
-          </div>
-        )}
-        {pdfStatus === "ready" && pdfUrl && (
-          <PdfAnnotationViewer
-            pdfUrl={pdfUrl}
-            issues={issues}
-            selectedIssueId={selectedId}
-            onSelectIssue={(iss) => onSelectIssue(iss.id)}
-          />
-        )}
+          )}
+          {pdfStatus === "error" && (
+            <div
+              className="card"
+              style={{
+                padding: 18,
+                background: "var(--error-bg)",
+                borderColor: "transparent",
+                borderLeft: "3px solid var(--error)",
+                color: "var(--error)",
+              }}
+            >
+              {pdfError ?? "PDF compile failed."}
+            </div>
+          )}
+          {pdfStatus === "ready" && pdfUrl && (
+            <PdfAnnotationViewer
+              pdfUrl={pdfUrl}
+              issues={issues}
+              selectedIssueId={selectedId}
+              onSelectIssue={(iss) => onSelectIssue(iss.id)}
+            />
+          )}
+        </div>
       </div>
 
       <div className="row between" style={{ marginTop: 12 }}>
         <div className="font-mono muted" style={{ fontSize: 11 }}>
           Letter · 8.5 × 11
-        </div>
-        <div className="font-mono muted" style={{ fontSize: 11 }}>
-          {pdfStatus === "ready" ? "compiled" : pdfStatus === "loading" ? "compiling…" : ""}
         </div>
       </div>
     </div>

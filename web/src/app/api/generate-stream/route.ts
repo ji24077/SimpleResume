@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { longFetch } from "@/lib/long-fetch";
+
+export const maxDuration = 900; // 15 min — covers worst-case revision loops
 
 const BACKEND = process.env.API_BACKEND_URL || "http://127.0.0.1:8000";
 
@@ -7,17 +10,19 @@ export async function POST(req: NextRequest) {
   let res: Response;
 
   if (ct.includes("application/json")) {
-    const body = await req.json();
-    res = await fetch(`${BACKEND}/generate-json-stream`, {
+    const body = await req.text();
+    res = await longFetch(`${BACKEND}/generate-json-stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body,
     });
   } else {
-    const form = await req.formData();
-    res = await fetch(`${BACKEND}/generate-stream`, {
+    // Forward multipart body as-is (preserves boundary)
+    const buf = await req.arrayBuffer();
+    res = await longFetch(`${BACKEND}/generate-stream`, {
       method: "POST",
-      body: form,
+      headers: { "Content-Type": ct },
+      body: buf,
     });
   }
 

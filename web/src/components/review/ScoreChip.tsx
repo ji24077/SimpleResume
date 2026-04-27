@@ -9,7 +9,9 @@ type Props = {
 };
 
 export default function ScoreChip({ score, grade, expanded, onToggle, loading }: Props) {
-  const val = score == null ? 0 : Math.round(score * 10);
+  // Backend returns score on a 0-10 scale; chip displays 0-100 like the design.
+  const display100 = score == null ? null : Math.round(Math.max(0, Math.min(10, score)) * 10);
+  const val = display100 ?? 0;
   return (
     <button
       type="button"
@@ -30,7 +32,7 @@ export default function ScoreChip({ score, grade, expanded, onToggle, loading }:
     >
       <div className="score-dial" style={{ ["--val" as string]: val, ["--size" as string]: "48px" }}>
         <div className="font-display" style={{ fontSize: 16, fontWeight: 600, lineHeight: 1 }}>
-          {loading ? "—" : score == null ? "—" : Math.round(score * 10)}
+          {loading || display100 == null ? "—" : display100}
         </div>
       </div>
       <div style={{ textAlign: "left" }}>

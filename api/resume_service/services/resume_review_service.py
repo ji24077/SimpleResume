@@ -101,16 +101,21 @@ def _build_credibility(score: ResumeScoreResponse) -> CredibilityInfo:
 
 
 def _role_label(role: RoleAnalysis) -> str:
-    parts = [role.company or "Unknown Company"]
-    if role.title:
-        parts.append(role.title)
-    return " > ".join(parts)
+    """Short, distinctive name for a role — prefer company, fall back to title.
+
+    Optionally suffix a short date range so two stints at the same company
+    stay distinguishable (e.g. "Sarvaj · 2025").
+    """
+    primary = (role.company or "").strip() or (role.title or "").strip() or "Unknown Role"
+    date_range = " ".join((role.date_range or "").split())
+    if date_range and len(date_range) <= 11:
+        return f"{primary} · {date_range}"
+    return primary
 
 
 def _bullet_location_label(bullet: BulletAnalysis, roles: list[RoleAnalysis]) -> str:
     role = next((r for r in roles if r.id == bullet.role_id), None)
-    base = _role_label(role) if role else "Unknown Role"
-    return f"Experience > {base}"
+    return _role_label(role) if role else "Unknown Role"
 
 
 def _issues_from_bullets(
@@ -159,12 +164,11 @@ def _issues_from_bullets(
         if any(t in ("Too Short", "Too Long", "Vague") for t in bullet.tags):
             cat = "clarity"
 
+        # Only the LLM rewrite counts as a "fix" the user can apply. Generic
+        # rubric suggestions ("Add measurable outcomes …") are not actionable
+        # rewrites — surface them via `description` instead so the card never
+        # shows fake apply-able content.
         suggested = bullet.rewrite or ""
-        if not suggested:
-            for rubric in bullet.rubrics.values():
-                if rubric.suggestion and len(rubric.suggestion) > 20:
-                    suggested = rubric.suggestion
-                    break
 
         issues.append(ReviewIssue(
             id=_issue_id("bullet", bullet.id),

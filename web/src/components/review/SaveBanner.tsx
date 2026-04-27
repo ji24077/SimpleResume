@@ -43,14 +43,13 @@ export default function SaveBanner() {
           Save this as your base résumé
         </div>
         <div style={{ fontSize: 12, color: "var(--fg-3)", lineHeight: 1.5 }}>
-          Sign-in is coming soon. Once it lands, you&apos;ll keep your fixes, fork job-tuned variants per posting,
-          and pick up where you left off.
+          Sign-in coming soon — keep your fixes and fork job-tuned variants per posting.
         </div>
       </div>
       <button type="button" className="btn btn-soft btn-sm" onClick={() => setDismissed(true)}>
         Not now
       </button>
-      <button type="button" className="btn btn-primary btn-sm" disabled title="Sign-in coming soon">
+      <button type="button" className="btn btn-primary btn-sm" disabled>
         Sign in to save →
       </button>
     </div>

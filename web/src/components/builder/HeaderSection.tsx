@@ -7,8 +7,7 @@ type HeaderSectionProps = {
   onChange: (next: ResumeHeader) => void;
 };
 
-const FIELD_BASE =
-  "w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600";
+const FIELD_BASE = "input";
 
 export default function HeaderSection({ header, onChange }: HeaderSectionProps) {
   const setField = <K extends keyof ResumeHeader>(key: K, value: ResumeHeader[K]) => {
@@ -32,7 +31,7 @@ export default function HeaderSection({ header, onChange }: HeaderSectionProps) 
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block">
-          <span className="mb-1 block text-xs uppercase tracking-wider text-zinc-500">Name</span>
+          <span className="t-label mb-1 block">Name</span>
           <input
             type="text"
             value={header.name}
@@ -42,7 +41,7 @@ export default function HeaderSection({ header, onChange }: HeaderSectionProps) 
           />
         </label>
         <label className="block">
-          <span className="mb-1 block text-xs uppercase tracking-wider text-zinc-500">Email</span>
+          <span className="t-label mb-1 block">Email</span>
           <input
             type="email"
             value={header.email}
@@ -52,7 +51,7 @@ export default function HeaderSection({ header, onChange }: HeaderSectionProps) 
           />
         </label>
         <label className="block">
-          <span className="mb-1 block text-xs uppercase tracking-wider text-zinc-500">Phone</span>
+          <span className="t-label mb-1 block">Phone</span>
           <input
             type="tel"
             value={header.phone}
@@ -65,17 +64,15 @@ export default function HeaderSection({ header, onChange }: HeaderSectionProps) 
 
       <div>
         <div className="mb-2 flex items-center justify-between">
-          <span className="text-xs uppercase tracking-wider text-zinc-500">Links</span>
-          <button
-            type="button"
-            onClick={addLink}
-            className="rounded-md border border-dashed border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:border-emerald-700 hover:text-emerald-300"
-          >
+          <span className="t-label">Links</span>
+          <button type="button" onClick={addLink} className="btn btn-soft btn-sm">
             + Add link
           </button>
         </div>
         {header.links.length === 0 ? (
-          <p className="text-xs text-zinc-600">No links yet (LinkedIn, GitHub, portfolio…).</p>
+          <p className="font-mono muted" style={{ fontSize: 11 }}>
+            No links yet (LinkedIn, GitHub, portfolio…).
+          </p>
         ) : (
           <div className="space-y-2">
             {header.links.map((link, i) => (
@@ -98,7 +95,7 @@ export default function HeaderSection({ header, onChange }: HeaderSectionProps) 
                   type="button"
                   onClick={() => removeLink(i)}
                   aria-label={`Remove link ${i + 1}`}
-                  className="rounded-md border border-zinc-700 px-3 py-2 text-xs text-zinc-400 hover:border-red-700 hover:text-red-300"
+                  className="btn btn-soft btn-sm"
                 >
                   Remove
                 </button>

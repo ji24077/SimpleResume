@@ -29,19 +29,32 @@ export default function ResumeForm({
     value.skills.languages.length + value.skills.frameworks.length + value.skills.tools.length;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5 px-4 py-6">
-      <header className="space-y-2">
-        <h2 className="text-xl font-semibold text-zinc-100">Review what we read</h2>
-        <p className="text-sm text-zinc-400">
-          Fix anything that looks off, then generate. You can also skip straight to generation if
-          everything looks right.
+    <div className="space-y-5">
+      <header>
+        <div className="t-eyebrow" style={{ marginBottom: 6 }}>
+          verify · what we read
+        </div>
+        <h2 className="font-display" style={{ fontSize: 28, fontWeight: 600 }}>
+          Review the parse before we rewrite
+        </h2>
+        <p style={{ fontSize: 14, color: "var(--fg-3)", marginTop: 6, maxWidth: 640 }}>
+          Fix anything that looks off, then generate. Anything you change here flows into the rewrite —
+          we never invent details that aren&apos;t in the source.
         </p>
       </header>
 
       {warnings.length > 0 && (
-        <div className="rounded-xl border border-amber-700/60 bg-amber-950/40 px-4 py-3 text-sm text-amber-200">
-          <p className="mb-1 font-medium">Parser notes</p>
-          <ul className="list-disc space-y-0.5 pl-5">
+        <div
+          className="card"
+          style={{
+            background: "var(--warn-bg)",
+            borderColor: "transparent",
+            borderLeft: "3px solid var(--warn)",
+            color: "var(--warn)",
+          }}
+        >
+          <p style={{ marginBottom: 6, fontWeight: 600 }}>Parser notes</p>
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
             {warnings.map((w, i) => (
               <li key={i}>{w}</li>
             ))}
@@ -86,15 +99,23 @@ export default function ResumeForm({
         </SectionAccordion>
       </div>
 
-      <div className="sticky bottom-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-zinc-800 bg-zinc-950/90 px-4 py-3 backdrop-blur">
+      <div
+        className="row between"
+        style={{
+          position: "sticky",
+          bottom: 16,
+          background: "color-mix(in oklab, var(--canvas) 92%, transparent)",
+          backdropFilter: "blur(10px)",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+          padding: "12px 16px",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
         {onBack ? (
-          <button
-            type="button"
-            onClick={onBack}
-            disabled={submitting}
-            className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:border-zinc-500 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Back to upload
+          <button type="button" onClick={onBack} disabled={submitting} className="btn btn-soft btn-sm">
+            ← Back to upload
           </button>
         ) : (
           <span />
@@ -103,9 +124,10 @@ export default function ResumeForm({
           type="button"
           onClick={onSubmit}
           disabled={submitting}
-          className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+          className="btn btn-primary"
+          style={{ padding: "10px 22px" }}
         >
-          {submitting ? "Generating…" : "Looks good — Generate"}
+          {submitting ? "Generating…" : "Looks good — generate →"}
         </button>
       </div>
     </div>

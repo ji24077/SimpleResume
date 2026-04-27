@@ -1,9 +1,11 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useReviewSession } from "@/lib/reviewSession";
 import { useReviewBundle } from "@/lib/useReviewBundle";
+import { applyBulletRewrite } from "@/lib/applyFix";
+import type { ReviewIssue } from "@/lib/types";
 import IssuesPanel from "@/components/review/IssuesPanel";
 import PageHead from "@/components/review/PageHead";
 import PdfPanel from "@/components/review/PdfPanel";
@@ -73,6 +75,63 @@ function ReviewPageInner() {
 
   const overall = bundle.score?.overall_score ?? null;
   const grade = bundle.score?.grade ?? null;
+
+  const pagePolicy = session.pagePolicy;
+  const replacePdf = bundle.replacePdf;
+  const renderAndSwap = useCallback(
+    async (rd: import("@/lib/types").ResumeData | null) => {
+      if (!rd) return;
+      const res = await fetch("/api/render-only", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resume_data: rd, page_policy: pagePolicy }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(typeof j.detail === "string" ? j.detail : "Render failed.");
+      }
+      const blob = await res.blob();
+      replacePdf(blob);
+    },
+    [pagePolicy, replacePdf],
+  );
+
+  const onApplyIssue = useCallback(
+    async (issue: ReviewIssue): Promise<boolean> => {
+      const rd = session.resumeData;
+      if (!rd) throw new Error("No structured résumé to patch.");
+      if (!issue.suggested_text) return false;
+      const { rd: patched, found } = applyBulletRewrite(
+        rd,
+        issue.original_text,
+        issue.suggested_text,
+      );
+      if (!found) return false;
+      session.setResumeData(patched);
+      await renderAndSwap(patched);
+      return true;
+    },
+    [session, renderAndSwap],
+  );
+
+  const onUndoApply = useCallback(
+    async (issue: ReviewIssue): Promise<boolean> => {
+      const rd = session.resumeData;
+      if (!rd) throw new Error("No structured résumé to patch.");
+      if (!issue.suggested_text || !issue.original_text) return false;
+      // Swap suggested → original to restore the bullet.
+      const { rd: patched, found } = applyBulletRewrite(
+        rd,
+        issue.suggested_text,
+        issue.original_text,
+      );
+      if (!found) return false;
+      session.setResumeData(patched);
+      await renderAndSwap(patched);
+      return true;
+    },
+    [session, renderAndSwap],
+  );
 
   if (!hydrated) {
     return (
@@ -172,6 +231,8 @@ function ReviewPageInner() {
               loading={bundle.reviewStatus === "loading"}
               selectedId={selectedIssueId}
               onSelect={setSelectedIssueId}
+              onApplyIssue={onApplyIssue}
+              onUndoApply={onUndoApply}
             />
           </div>
         )}

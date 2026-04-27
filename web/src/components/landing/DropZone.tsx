@@ -3,13 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useReviewSession } from "@/lib/reviewSession";
-import {
-  pasteContactGaps,
-  submitLegacyGenerate,
-  submitParse,
-} from "@/lib/upload";
-
-const FEATURE_PARSE_REVIEW = process.env.NEXT_PUBLIC_FEATURE_PARSE_REVIEW === "true";
+import { pasteContactGaps, submitParse } from "@/lib/upload";
 
 export default function DropZone() {
   const router = useRouter();
@@ -50,33 +44,16 @@ export default function DropZone() {
         session.startSession();
         session.setRawText(pasteText || null);
 
-        if (FEATURE_PARSE_REVIEW) {
-          const parsed = await submitParse({
-            file,
-            paste: pasteText,
-            contactEmail,
-            contactLinkedin,
-            contactPhone,
-          });
-          session.setParse(parsed);
-          session.setResumeData(parsed.resume_data);
-          router.push("/review?stage=verify");
-          return;
-        }
-
-        const result = await submitLegacyGenerate(
-          {
-            file,
-            paste: pasteText,
-            pagePolicy: session.pagePolicy,
-            contactEmail,
-            contactLinkedin,
-            contactPhone,
-          },
-          (msg) => setProgress(msg),
-        );
-        session.setGenerate(result);
-        router.push("/review");
+        const parsed = await submitParse({
+          file,
+          paste: pasteText,
+          contactEmail,
+          contactLinkedin,
+          contactPhone,
+        });
+        session.setParse(parsed);
+        session.setResumeData(parsed.resume_data);
+        router.push("/edit");
       } catch (e) {
         setError(e instanceof Error ? e.message : "Upload failed");
       } finally {
@@ -109,8 +86,16 @@ export default function DropZone() {
         onDragOver={(e) => e.preventDefault()}
         onDrop={onDrop}
         onClick={() => !loading && fileRef.current?.click()}
+        onKeyDown={(e) => {
+          if (loading) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            fileRef.current?.click();
+          }
+        }}
         role="button"
         tabIndex={0}
+        aria-label="Upload résumé file"
       >
         <input
           ref={fileRef}

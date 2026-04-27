@@ -18,18 +18,22 @@ export default function EntryCard({
   children,
 }: EntryCardProps) {
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
+    <div
+      className="rounded-lg p-4"
+      style={{ border: "1px solid var(--border)", background: "var(--canvas-alt)" }}
+    >
       <div className="mb-3 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-zinc-100">{heading || "Untitled entry"}</p>
-          {subheading && <p className="truncate text-xs text-zinc-500">{subheading}</p>}
+          <p className="truncate" style={{ fontSize: 14, fontWeight: 500, color: "var(--fg-1)" }}>
+            {heading || "Untitled entry"}
+          </p>
+          {subheading && (
+            <p className="truncate font-mono muted" style={{ fontSize: 11 }}>
+              {subheading}
+            </p>
+          )}
         </div>
-        <button
-          type="button"
-          onClick={onDelete}
-          aria-label={deleteLabel}
-          className="rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-400 hover:border-red-700 hover:text-red-300"
-        >
+        <button type="button" onClick={onDelete} aria-label={deleteLabel} className="btn btn-soft btn-sm">
           Delete
         </button>
       </div>

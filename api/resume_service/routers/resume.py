@@ -507,6 +507,7 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                         detail="Model returned invalid JSON on one-page revision. Retry.",
                     ) from e
 
+                _inject_preview_coaching_from_previous(data, resp)
                 resp, blob = _coerce_any_response(
                     data,
                     client=client,
@@ -616,6 +617,7 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                                 )
                                 resp, latex, pdf = resp_snap, latex_snap, pdf_snap
                                 break
+                            _inject_preview_coaching_from_previous(data, resp)
                             try:
                                 if structured:
                                     resp_try, blob_try = _coerce_any_response(
@@ -753,6 +755,7 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                     detail="Model returned invalid JSON on density expand. Retry.",
                 ) from e
 
+            _inject_preview_coaching_from_previous(data, resp)
             resp, blob = _coerce_any_response(
                 data,
                 client=client,
@@ -1043,3 +1046,38 @@ def resume_generate_from_structured(body: GenerateFromStructuredBody):
             yield (json.dumps(err, ensure_ascii=False) + "\n").encode("utf-8")
 
     return StreamingResponse(ndjson_iter(), media_type="application/x-ndjson; charset=utf-8")
+
+
+@router.post("/resume/render-only")
+def resume_render_only(body: GenerateFromStructuredBody):
+    """Deterministic render: structured resume_data → LaTeX → compiled PDF.
+
+    No LLM calls. Used by the issue card "Apply fix" UX so a single bullet
+    rewrite swaps in and the PDF refreshes within ~3 s of Docker compile.
+    """
+    try:
+        rd = parse_resume_data(body.resume_data)
+    except PydValidationError as e:
+        # e.errors() may contain non-JSON-serializable objects (Pydantic stores
+        # the original ValueError under ctx.error). Stringify safely.
+        errs = json.loads(json.dumps(e.errors(), default=str))
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "resume_data_invalid", "errors": errs},
+        ) from e
+
+    from features.generation.structured_resume import build_latex_document
+
+    try:
+        latex = build_latex_document(rd)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+    latex = sanitize_latex_for_overleaf(sanitize_unicode_for_latex(latex))
+    pdf, err_detail = compile_latex_to_pdf(latex)
+    if not pdf:
+        msg = json.loads(json.dumps(err_detail or {"error": "compile_failed"}, default=str))
+        raise HTTPException(status_code=502, detail=msg)
+    from fastapi.responses import Response
+
+    return Response(content=pdf, media_type="application/pdf")

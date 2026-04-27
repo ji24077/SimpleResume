@@ -6,17 +6,11 @@ export const maxDuration = 600;
 const BACKEND = process.env.API_BACKEND_URL || "http://127.0.0.1:8000";
 
 export async function POST(req: NextRequest) {
-  let bodyText: string;
-  try {
-    bodyText = await req.text();
-    JSON.parse(bodyText);
-  } catch {
-    return NextResponse.json({ detail: "Invalid JSON" }, { status: 400 });
-  }
-  const r = await longFetch(`${BACKEND}/compile-pdf`, {
+  const body = await req.text();
+  const r = await longFetch(`${BACKEND}/resume/render-only`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: bodyText,
+    body,
   });
   if (r.ok) {
     const buf = await r.arrayBuffer();

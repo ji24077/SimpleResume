@@ -9,8 +9,7 @@ type EducationSectionProps = {
   onChange: (next: EducationEntry[]) => void;
 };
 
-const FIELD_BASE =
-  "w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600";
+const FIELD_BASE = "input";
 
 const EMPTY_EDU: EducationEntry = {
   school: "",
@@ -43,9 +42,7 @@ export default function EducationSection({ education, onChange }: EducationSecti
         >
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block">
-              <span className="mb-1 block text-xs uppercase tracking-wider text-zinc-500">
-                School
-              </span>
+              <span className="t-label mb-1 block">School</span>
               <input
                 type="text"
                 value={entry.school}
@@ -55,9 +52,7 @@ export default function EducationSection({ education, onChange }: EducationSecti
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs uppercase tracking-wider text-zinc-500">
-                Degree
-              </span>
+              <span className="t-label mb-1 block">Degree</span>
               <input
                 type="text"
                 value={entry.degree}
@@ -67,9 +62,7 @@ export default function EducationSection({ education, onChange }: EducationSecti
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs uppercase tracking-wider text-zinc-500">
-                Dates
-              </span>
+              <span className="t-label mb-1 block">Dates</span>
               <input
                 type="text"
                 value={entry.date}
@@ -79,9 +72,7 @@ export default function EducationSection({ education, onChange }: EducationSecti
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs uppercase tracking-wider text-zinc-500">
-                Location
-              </span>
+              <span className="t-label mb-1 block">Location</span>
               <input
                 type="text"
                 value={entry.location}
@@ -92,9 +83,7 @@ export default function EducationSection({ education, onChange }: EducationSecti
             </label>
           </div>
           <div>
-            <span className="mb-1 block text-xs uppercase tracking-wider text-zinc-500">
-              Highlights (optional)
-            </span>
+            <span className="t-label mb-1 block">Highlights (optional)</span>
             <BulletList
               bullets={entry.bullets}
               onChange={(next) => update(i, { bullets: next })}
@@ -103,11 +92,7 @@ export default function EducationSection({ education, onChange }: EducationSecti
           </div>
         </EntryCard>
       ))}
-      <button
-        type="button"
-        onClick={add}
-        className="w-full rounded-xl border border-dashed border-zinc-700 px-4 py-3 text-sm text-zinc-300 hover:border-emerald-700 hover:text-emerald-300"
-      >
+      <button type="button" onClick={add} className="btn btn-soft" style={{ width: "100%" }}>
         + Add education entry
       </button>
     </div>

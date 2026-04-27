@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { longFetch } from "@/lib/long-fetch";
+
+export const maxDuration = 600;
 
 const BACKEND = process.env.API_BACKEND_URL || "http://127.0.0.1:8000";
 
@@ -7,13 +10,13 @@ export async function POST(req: NextRequest) {
 
   let upstream: Response;
   if (contentType.includes("application/json")) {
-    upstream = await fetch(`${BACKEND}/resume/score-from-text`, {
+    upstream = await longFetch(`${BACKEND}/resume/score-from-text`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: await req.text(),
     });
   } else {
-    upstream = await fetch(`${BACKEND}/resume/score`, {
+    upstream = await longFetch(`${BACKEND}/resume/score`, {
       method: "POST",
       body: await req.arrayBuffer(),
       headers: { "Content-Type": contentType },

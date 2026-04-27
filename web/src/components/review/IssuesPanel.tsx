@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { ReviewIssue } from "@/lib/types";
 import IssueCard from "./IssueCard";
 
@@ -9,13 +9,103 @@ type Props = {
   loading: boolean;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
+  /** Apply: returns true if the resume was patched and the PDF re-rendered. */
+  onApplyIssue?: (issue: ReviewIssue) => Promise<boolean> | boolean;
+  /** Undo a previously-applied fix — swap the suggested text back to original in the resume. */
+  onUndoApply?: (issue: ReviewIssue) => Promise<boolean> | boolean;
 };
 
-export default function IssuesPanel({ issues, loading, selectedId, onSelect }: Props) {
+export default function IssuesPanel({
+  issues,
+  loading,
+  selectedId,
+  onSelect,
+  onApplyIssue,
+  onUndoApply,
+}: Props) {
   const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [errorById, setErrorById] = useState<Record<string, string>>({});
 
-  const visible = issues.filter((i) => !dismissedIds.has(i.id));
+  const issueById = useMemo(() => {
+    const m = new Map<string, ReviewIssue>();
+    issues.forEach((i) => m.set(i.id, i));
+    return m;
+  }, [issues]);
+
+  const active = issues.filter((i) => !appliedIds.has(i.id) && !dismissedIds.has(i.id));
+  const applied = Array.from(appliedIds)
+    .map((id) => issueById.get(id))
+    .filter((i): i is ReviewIssue => !!i);
+  const dismissed = Array.from(dismissedIds)
+    .map((id) => issueById.get(id))
+    .filter((i): i is ReviewIssue => !!i);
+
+  const clearError = (id: string) =>
+    setErrorById((m) => {
+      const next = { ...m };
+      delete next[id];
+      return next;
+    });
+
+  const apply = async (issue: ReviewIssue) => {
+    setPendingId(issue.id);
+    clearError(issue.id);
+    try {
+      const ok = onApplyIssue ? await onApplyIssue(issue) : true;
+      if (ok) {
+        setAppliedIds((s) => new Set([...s, issue.id]));
+      } else {
+        setErrorById((m) => ({
+          ...m,
+          [issue.id]: "Couldn't locate that bullet — try again.",
+        }));
+      }
+    } catch (e) {
+      setErrorById((m) => ({
+        ...m,
+        [issue.id]: e instanceof Error ? e.message : "Apply failed.",
+      }));
+    } finally {
+      setPendingId(null);
+    }
+  };
+
+  const undoApply = async (issue: ReviewIssue) => {
+    setPendingId(issue.id);
+    clearError(issue.id);
+    try {
+      const ok = onUndoApply ? await onUndoApply(issue) : true;
+      if (ok) {
+        setAppliedIds((s) => {
+          const next = new Set(s);
+          next.delete(issue.id);
+          return next;
+        });
+      } else {
+        setErrorById((m) => ({
+          ...m,
+          [issue.id]: "Couldn't undo — bullet may have been edited elsewhere.",
+        }));
+      }
+    } catch (e) {
+      setErrorById((m) => ({
+        ...m,
+        [issue.id]: e instanceof Error ? e.message : "Undo failed.",
+      }));
+    } finally {
+      setPendingId(null);
+    }
+  };
+
+  const undoDismiss = (issue: ReviewIssue) => {
+    setDismissedIds((s) => {
+      const next = new Set(s);
+      next.delete(issue.id);
+      return next;
+    });
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -25,14 +115,19 @@ export default function IssuesPanel({ issues, loading, selectedId, onSelect }: P
           <div className="font-mono muted" style={{ fontSize: 11, marginTop: 2 }}>
             {loading
               ? "loading…"
-              : `${visible.length} item${visible.length === 1 ? "" : "s"} · ${appliedIds.size} applied`}
+              : `${active.length} active · ${applied.length} applied · ${dismissed.length} dismissed`}
           </div>
         </div>
         <button
           type="button"
           className="btn btn-primary btn-sm"
-          disabled={loading || visible.length === 0}
-          onClick={() => setAppliedIds(new Set(visible.map((i) => i.id)))}
+          disabled={loading || active.length === 0 || pendingId !== null}
+          onClick={async () => {
+            for (const iss of active) {
+              if (!iss.suggested_text) continue;
+              await apply(iss);
+            }
+          }}
         >
           Apply all →
         </button>
@@ -50,7 +145,7 @@ export default function IssuesPanel({ issues, loading, selectedId, onSelect }: P
         </>
       )}
 
-      {!loading && visible.length === 0 && (
+      {!loading && active.length === 0 && applied.length === 0 && dismissed.length === 0 && (
         <div className="card" style={{ padding: 18, textAlign: "center" }}>
           <p className="muted" style={{ fontSize: 13 }}>
             No issues flagged. Either your résumé is clean, or the reviewer is still warming up.
@@ -59,16 +154,72 @@ export default function IssuesPanel({ issues, loading, selectedId, onSelect }: P
       )}
 
       {!loading &&
-        visible.map((iss, idx) => (
+        active.map((iss, idx) => (
           <IssueCard
             key={iss.id}
             issue={iss}
             index={idx}
             selected={selectedId === iss.id}
-            applied={appliedIds.has(iss.id)}
+            applied={false}
+            pending={pendingId === iss.id}
+            error={errorById[iss.id]}
             onSelect={() => onSelect(iss.id === selectedId ? null : iss.id)}
-            onApply={() => setAppliedIds((s) => new Set([...s, iss.id]))}
+            onApply={() => apply(iss)}
             onDismiss={() => setDismissedIds((s) => new Set([...s, iss.id]))}
+          />
+        ))}
+
+      {!loading && (applied.length > 0 || dismissed.length > 0) && (
+        <div
+          className="row"
+          style={{
+            gap: 8,
+            margin: "8px 0 2px",
+            padding: "0 4px",
+            color: "var(--fg-5)",
+          }}
+        >
+          <span className="t-label" style={{ fontSize: 10 }}>
+            Resolved
+          </span>
+          <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+        </div>
+      )}
+
+      {!loading &&
+        applied.map((iss, idx) => (
+          <IssueCard
+            key={`applied-${iss.id}`}
+            issue={iss}
+            index={active.length + idx}
+            selected={selectedId === iss.id}
+            applied
+            pending={pendingId === iss.id}
+            error={errorById[iss.id]}
+            onSelect={() => onSelect(iss.id === selectedId ? null : iss.id)}
+            onApply={() => apply(iss)}
+            onDismiss={() => setDismissedIds((s) => new Set([...s, iss.id]))}
+            onUndo={() => undoApply(iss)}
+            undoLabel="Undo apply"
+          />
+        ))}
+
+      {!loading &&
+        dismissed.map((iss, idx) => (
+          <IssueCard
+            key={`dismissed-${iss.id}`}
+            issue={iss}
+            index={active.length + applied.length + idx}
+            selected={selectedId === iss.id}
+            applied={false}
+            dismissed
+            pending={pendingId === iss.id}
+            error={errorById[iss.id]}
+            onSelect={() => onSelect(iss.id === selectedId ? null : iss.id)}
+            onApply={() => apply(iss)}
+            onDismiss={() => setDismissedIds((s) => new Set([...s, iss.id]))}
+            onUndo={() => undoDismiss(iss)}
+            undoLabel="Undo dismiss"
           />
         ))}
     </div>

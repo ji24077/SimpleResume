@@ -13,10 +13,23 @@ export default function Statusbar() {
   const [health, setHealth] = useState<BackendHealth | null>(null);
 
   useEffect(() => {
-    fetch("/api/backend-health")
-      .then((r) => r.json())
-      .then(setHealth)
-      .catch(() => setHealth({ ok: false, error: "Health check failed" }));
+    let alive = true;
+    const ping = () => {
+      fetch("/api/backend-health")
+        .then((r) => r.json())
+        .then((d) => {
+          if (alive) setHealth(d);
+        })
+        .catch(() => {
+          if (alive) setHealth({ ok: false, error: "Health check failed" });
+        });
+    };
+    ping();
+    const t = setInterval(ping, 30000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
   }, []);
 
   const apiOk = !!health?.ok;

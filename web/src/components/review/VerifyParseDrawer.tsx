@@ -63,6 +63,7 @@ export default function VerifyParseDrawer({ open, onClose }: Props) {
           borderLeft: "1px solid var(--border)",
           boxShadow: "var(--shadow-modal)",
           overflowY: "auto",
+          paddingBottom: 80,
         }}
       >
         <div
