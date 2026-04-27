@@ -1,12 +1,21 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import dynamic from "next/dynamic";
 import type { ReviewResponse, ReviewIssue } from "@/lib/types";
 import ResumeScoreHeader from "./ResumeScoreHeader";
-import PdfAnnotationViewer from "./PdfAnnotationViewer";
 import AnnotatedResume from "./AnnotatedResume";
 import CommentPanel from "./CommentPanel";
 import ResumeFixDrawer from "./ResumeFixDrawer";
+
+const PdfAnnotationViewer = dynamic(() => import("./PdfAnnotationViewer"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-full items-center justify-center">
+      <div className="h-5 w-5 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
+    </div>
+  ),
+});
 
 interface ReviewWorkspaceProps {
   review: ReviewResponse;

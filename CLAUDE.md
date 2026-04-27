@@ -56,6 +56,7 @@ make test
 - **Core must not import from `extensions/`** — dependency is one-way only.
 - **Prefer `feature/*` branches** for new work.
 - **`GenerateResponse` is additive-only** — never remove, rename, or change the type of existing fields; only add new optional ones.
+- **Existing features are read-only by default** — do not modify, refactor, or change behavior of existing features unless the user explicitly requests a modification or update. New work must be purely additive.
 - **Smallest diff wins** — avoid whole-file rewrites when editing existing modules.
 
 ---
@@ -99,6 +100,15 @@ User input (text / PDF upload)
 | `api/resume_service/routers/compile.py` | POST /compile, /compile-pdf |
 | `api/resume_service/routers/resume.py` | POST /generate, /generate-stream, /generate-json-stream + pipeline |
 | `api/resume_service/routers/_helpers.py` | Shared models (GenerateResponse, etc.), coerce/repair helpers |
+| `api/resume_service/routers/resume_score.py` | POST /resume/score, /resume/score-from-text |
+| `api/resume_service/routers/resume_review.py` | POST /resume/review, /resume/review-from-text |
+| `api/resume_service/models/resume_score.py` | Pydantic models: `ResumeScoreResponse`, `BulletAnalysis`, `RoleAnalysis`, `AtsAudit` |
+| `api/resume_service/models/resume_review.py` | Pydantic models: `ReviewResponse`, `ReviewIssue`, `CategoryScores`, `CredibilityInfo` |
+| `api/resume_service/services/resume_score_service.py` | Score orchestrator — calls parser → rules → LLM → assembles response |
+| `api/resume_service/services/resume_score_llm.py` | OpenAI rubric scoring across 12 weighted dimensions |
+| `api/resume_service/services/resume_score_rules.py` | Heuristic scoring: metrics density, keyword coverage, parseability |
+| `api/resume_service/services/resume_score_parser.py` | Regex NLP: section detection, role extraction, bullet identification |
+| `api/resume_service/services/resume_review_service.py` | Transforms `ResumeScoreResponse` → `ReviewResponse` with location hints |
 | `api/features/generation/prompts.py` | All LLM system/user prompts (generator, fixer, densify, ATS checker) |
 | `api/features/generation/structured_resume.py` | Optional Pydantic schema + LaTeX builder (`RESUME_STRUCTURED_LATEX=true`) |
 | `api/features/pdf_rendering/compile_pdf.py` | Docker compile, LaTeX sanitization, page count, density measurement |
@@ -107,8 +117,14 @@ User input (text / PDF upload)
 | `api/features/resume_pipeline/pipeline/` | Per-gate modules: `lint`, `compile`, `pdf_checks`, `ats_check`, `fixer_llm`, `checker_llm` |
 | `web/src/app/page.tsx` | Main upload + generation UI |
 | `web/src/app/latex/page.tsx` | LaTeX-only compile interface |
+| `web/src/app/resume-score/page.tsx` | Resume Score page — upload → tabbed rubric + ATS + bullet analysis |
+| `web/src/app/resume-review/page.tsx` | Resume Review page — upload → annotated PDF workspace |
 | `web/src/app/api/generate-stream/route.ts` | Streaming proxy to backend |
-| `web/src/lib/types.ts` | `GenerateResponse` TypeScript type |
+| `web/src/app/api/resume-score/route.ts` | Proxy to /resume/score or /resume/score-from-text |
+| `web/src/app/api/resume-review/route.ts` | Proxy to /resume/review or /resume/review-from-text |
+| `web/src/lib/types.ts` | All TypeScript types — `GenerateResponse`, `ResumeScoreResponse`, `ReviewResponse`, etc. |
+| `web/src/components/resume-score/` | 9 components: overview, rubric grid, role/bullet/ATS sections, badges |
+| `web/src/components/resume-review/` | 10 components: `ReviewWorkspace`, `PdfAnnotationViewer`, `CommentPanel`, `ResumeFixDrawer`, etc. |
 
 ### Non-obvious design decisions
 
@@ -123,6 +139,12 @@ User input (text / PDF upload)
 **LaTeX sanitization** — The sanitizer in `compile_pdf.py` fixes double-backslashes, empty `\href{}{}`, missing backslashes on macros, unmatched `\begin{center}`, and ensures `\resumeProjectHeading` is wrapped in `\resumeSubHeadingListStart`…`\resumeSubHeadingListEnd`. This logic is delicate — do not modify without running the full unit test suite.
 
 **Extension architecture** — New optional features go under `extensions/` with `FEATURE_*` env-var gates. Core must not import extensions (one-way dependency enforced by convention).
+
+**Resume Score pipeline** — `resume_score_service.py` orchestrates three layers: (1) regex NLP parser (`resume_score_parser.py`) extracts sections/roles/bullets from raw text, (2) rule engine (`resume_score_rules.py`) scores heuristically (metrics density, keyword coverage, parseability), (3) LLM rubric (`resume_score_llm.py`) scores 12 weighted dimensions via OpenAI. The three outputs merge into a single `ResumeScoreResponse`.
+
+**Resume Review as score transform** — `resume_review_service.py` does not call the LLM directly. It converts a `ResumeScoreResponse` into a `ReviewResponse` by mapping low-scoring rubric dimensions to annotated `ReviewIssue` objects with location hints (section/role/bullet), severity levels, and suggested rewrites. PDF highlight overlays in `PdfAnnotationViewer.tsx` are positioned via bounding-box coordinates returned in the response.
+
+**TypeScript ↔ Python type sync** — `web/src/lib/types.ts` mirrors every Pydantic model in `api/resume_service/models/`. When adding or changing a model field, both files must be updated together.
 
 ### Core-protected paths (CI blocks PRs without `allow-core-change` label)
 - `api/features/pdf_rendering/compile_pdf.py`

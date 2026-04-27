@@ -447,15 +447,19 @@ The document compiles to **{pages}** page(s); it must fit **exactly ONE** U.S. l
 
 **Hard rule — 100% factual preservation:** After editing, **every** technology name, number/metric, system/product, compliance or audit term, and concrete scope phrase that appears in CURRENT_LATEX must **still** appear (same meaning). You may rephrase for brevity but **forbidden:** dropping a specific tool/metric to replace with a generic verb; shortening a bullet so a sourced detail disappears.
 
-Instructions (follow in order; stop when one page):
+Instructions (follow in order; stop as soon as one page is achieved):
 1) Optional **mild** negative \\vspace only where the template already uses \\vspace (do not break macros).
 2) Remove **filler** only: empty intensifiers, redundant “that/which” clauses, “successfully/various/in order to”—**not** nouns, numbers, or tech names.
-3) Tighten phrasing: same facts, fewer words **without** losing any named entity or number from step 0.
+3) Tighten phrasing: same facts, fewer words **without** losing any named entity or number.
 4) Only if still 2+ pages: merge two \\resumeItem lines **only** when they repeat the **same** outcome with no **exclusive** fact in either line.
-5) **Last resort:** remove **one** bullet **only** if that bullet adds **no** exclusive fact vs the rest of the role (verify before deleting).
 
-- Preserve every \\resumeSubheading (job/project); preserve bullet count unless step 5 applies.
-- Do not remove entire sections. Do not invent facts. Do not change the verbatim TEMPLATE preamble.
+If still over one page, apply the following **priority-based removal** (lowest priority removed first; stop the moment one page is reached):
+5) **Projects first:** Remove the least-impactful \\resumeProjectHeading entry (the one with the fewest unique technologies or metrics not covered elsewhere).
+6) **Oldest experience bullets:** From the chronologically oldest \\resumeSubheading in Experience, remove its weakest bullet (the one most generic or least metric-backed). Repeat for that role before moving to the next-oldest.
+7) **Newer experience bullets:** Move up chronologically — remove the weakest bullet from the next-oldest role, and so on.
+8) **Last resort:** Remove an entire oldest \\resumeSubheading only if its remaining bullets add no fact not covered by a newer role.
+
+- Do not remove entire sections (Education, Skills, etc.). Do not invent facts. Do not change the verbatim TEMPLATE preamble.
 
 {JSON_KEYS_REMINDER}
 
@@ -725,13 +729,18 @@ The PDF renders to **{pages}** page(s); content must fit **exactly ONE** U.S. le
 
 **Hard rule — 100% factual preservation:** After editing, **every** technology name, number/metric, system/product, and concrete scope phrase that appears anywhere in CURRENT_RESUME_DATA must **still** appear (same meaning). Forbidden: dropping specifics to sound shorter.
 
-Edit resume_data only, in order:
+Edit resume_data only, in order (stop as soon as one page is achieved):
 1) Remove **filler** words only (not nouns, numbers, or tech names).
 2) Tighten wording: same facts, fewer characters **without** losing any named entity or number.
 3) If still too long: merge two bullets **only** if they repeat the same fact with no exclusive detail in either.
-4) **Last resort:** delete **one** bullet per role **only** if it adds no exclusive fact vs the rest.
 
-Preserve every job/school/project entry. Do not remove entire jobs or schools.
+If still over one page, apply **priority-based removal** (lowest priority first):
+4) **Projects first:** Remove the least-impactful project entry (fewest unique tech/metrics not covered elsewhere).
+5) **Oldest experience bullets:** From the chronologically oldest job, remove its weakest bullet (most generic, least metric-backed). Repeat for that role before moving to the next-oldest.
+6) **Newer experience bullets:** Move up chronologically — remove the weakest bullet from the next-oldest role, and so on.
+7) **Last resort:** Remove the entire oldest job entry only if its remaining bullets add no fact not covered by a newer role.
+
+Preserve every school entry. Do not remove entire sections (Education, Skills).
 
 {JSON_KEYS_REMINDER_STRUCTURED}
 
