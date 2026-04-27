@@ -2,6 +2,9 @@
 
 import hashlib
 import logging
+import re
+import threading
+import time
 
 from resume_service.models.resume_score import (
     AtsAudit,
@@ -28,6 +31,62 @@ from resume_service.services.resume_score_rules import (
 logger = logging.getLogger(__name__)
 
 _DEFAULT_RUBRIC = RubricScore(score=5.0, reason="LLM scoring unavailable.", suggestion="")
+
+# In-process cache so /resume/review can reuse a recently-computed score from
+# /resume/score (the frontend fires both in parallel; without this, we'd run the
+# expensive LLM scoring twice and the second often hits a transient rate-limit).
+_SCORE_CACHE: dict[str, tuple[float, "ResumeScoreResponse"]] = {}
+_SCORE_CACHE_LOCK = threading.Lock()
+_SCORE_CACHE_TTL_SEC = 600.0
+
+
+def _score_cache_key(text: str, job_description: str) -> str:
+    return hashlib.sha256(
+        (text or "").encode("utf-8") + b"||" + (job_description or "").encode("utf-8")
+    ).hexdigest()
+
+
+def _score_cache_get(key: str) -> "ResumeScoreResponse | None":
+    now = time.time()
+    with _SCORE_CACHE_LOCK:
+        entry = _SCORE_CACHE.get(key)
+        if entry is None:
+            return None
+        ts, value = entry
+        if now - ts > _SCORE_CACHE_TTL_SEC:
+            _SCORE_CACHE.pop(key, None)
+            return None
+        return value
+
+
+def _score_cache_put(key: str, value: "ResumeScoreResponse") -> None:
+    with _SCORE_CACHE_LOCK:
+        # bound size to prevent memory growth across long-lived dev sessions
+        if len(_SCORE_CACHE) > 64:
+            _SCORE_CACHE.clear()
+        _SCORE_CACHE[key] = (time.time(), value)
+
+_BULLET_NORM_RE = re.compile(r"[^\w\s]+")
+
+
+def _norm_bullet_key(text: str, length: int = 60) -> str:
+    """Normalize bullet text for matching: strip leading bullet glyphs, drop
+    punctuation, collapse whitespace, lowercase, take first `length` chars.
+
+    Robust against the LLM lightly rewording the echo of `text` in its JSON
+    response (extra spaces, trailing punctuation, smart-quote variants)."""
+    if not text:
+        return ""
+    cleaned = text.strip().lstrip("-•*→— ").strip()
+    cleaned = _BULLET_NORM_RE.sub(" ", cleaned)
+    cleaned = " ".join(cleaned.split()).lower()
+    return cleaned[:length]
+
+
+def _short_bullet_key(text: str, words: int = 5) -> str:
+    """Last-resort fallback: first `words` words, normalized."""
+    norm = _norm_bullet_key(text, length=200)
+    return " ".join(norm.split()[:words])
 
 _OVERALL_WEIGHTS: dict[str, float] = {
     "authenticity": 0.08,
@@ -83,6 +142,12 @@ def _bullet_id(text: str, role_id: str) -> str:
 def score_resume(text: str, job_description: str = "") -> ResumeScoreResponse:
     """Parse, score (rules + LLM), and return a full ResumeScoreResponse."""
 
+    cache_key = _score_cache_key(text, job_description)
+    cached = _score_cache_get(cache_key)
+    if cached is not None:
+        logger.info("score_resume cache hit (key=%s)", cache_key[:12])
+        return cached
+
     # --- 1. Parse ---
     parsed = parse_resume(text)
 
@@ -111,9 +176,16 @@ def score_resume(text: str, job_description: str = "") -> ResumeScoreResponse:
     llm_roles = {r["id"]: r for r in llm_data.get("roles", []) if isinstance(r, dict) and "id" in r}
     llm_bullets_raw = llm_data.get("bullets", [])
     llm_bullets_by_text: dict[str, dict] = {}
+    llm_bullets_by_short: dict[str, dict] = {}
     for b in llm_bullets_raw:
-        if isinstance(b, dict) and "text" in b:
-            llm_bullets_by_text[b["text"][:60].strip().lower()] = b
+        if not (isinstance(b, dict) and "text" in b):
+            continue
+        norm = _norm_bullet_key(b["text"])
+        if norm:
+            llm_bullets_by_text.setdefault(norm, b)
+        short = _short_bullet_key(b["text"])
+        if short:
+            llm_bullets_by_short.setdefault(short, b)
 
     # --- 4. Build resume-level rubrics (LLM semantic + rule systemic) ---
     semantic_names = ["authenticity", "realism", "specificity", "clarity", "grammar", "relevance"]
@@ -171,8 +243,29 @@ def score_resume(text: str, job_description: str = "") -> ResumeScoreResponse:
         for bt in pr.bullets:
             rule_rubrics = score_bullet_heuristics(bt)
 
-            bt_key = bt[:60].strip().lower()
-            llm_bullet = llm_bullets_by_text.get(bt_key, {})
+            norm_key = _norm_bullet_key(bt)
+            short_key = _short_bullet_key(bt)
+            llm_bullet = llm_bullets_by_text.get(norm_key) or llm_bullets_by_short.get(short_key) or {}
+            match_path = "exact"
+            if not llm_bullet:
+                match_path = "miss"
+            elif norm_key not in llm_bullets_by_text and short_key in llm_bullets_by_short:
+                match_path = "short"
+            if not llm_bullet and norm_key:
+                # Last-ditch substring scan — pick the LLM bullet whose normalized
+                # 60-char prefix is a substring of ours, or vice versa.
+                for cand_key, cand in llm_bullets_by_text.items():
+                    if cand_key and (cand_key in norm_key or norm_key.startswith(cand_key[:30])):
+                        llm_bullet = cand
+                        match_path = "substring"
+                        break
+            if match_path != "exact" and logger.isEnabledFor(logging.WARNING):
+                logger.warning(
+                    "bullet match=%s parsed=%r llm_keys_count=%d",
+                    match_path,
+                    bt[:60],
+                    len(llm_bullets_by_text),
+                )
             llm_bullet_rubrics = llm_bullet.get("rubrics", {}) if isinstance(llm_bullet, dict) else {}
 
             merged_rubrics: dict[str, RubricScore] = dict(rule_rubrics)
@@ -342,7 +435,7 @@ def score_resume(text: str, job_description: str = "") -> ResumeScoreResponse:
     recommendations.sort(key=lambda r: {"high": 0, "medium": 1, "low": 2}.get(r.priority, 1))
 
     # --- 10. Build response ---
-    return ResumeScoreResponse(
+    response = ResumeScoreResponse(
         overall_score=overall,
         grade=grade,
         summary=summary,
@@ -354,3 +447,5 @@ def score_resume(text: str, job_description: str = "") -> ResumeScoreResponse:
         ats_audit=ats_audit,
         recommendations=recommendations[:10],
     )
+    _score_cache_put(cache_key, response)
+    return response

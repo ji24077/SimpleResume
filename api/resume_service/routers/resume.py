@@ -134,6 +134,57 @@ def _progress_event(log_en: list[str]) -> dict[str, Any]:
     }
 
 
+_HEADER_HREF_RE = __import__("re").compile(
+    r"\\href\{([^}]+)\}\{([^}]*)\}", flags=__import__("re").IGNORECASE
+)
+
+
+def _strip_hallucinated_header_links(latex: str, raw: str) -> str:
+    """Remove header `\\href{URL}{label}` entries whose URL host (or full URL)
+    isn't present in the source. Replaces them with the bare label so the
+    layout doesn't shift but no fabricated link reaches the PDF.
+
+    Only the document head is scanned (everything before the first `\\section`)
+    so body-link macros — which are far less likely to be hallucinated — are
+    untouched.
+    """
+    if not latex or not raw:
+        return latex
+    section_idx = latex.find("\\section")
+    head_end = section_idx if section_idx > 0 else len(latex)
+    raw_lc = raw.lower()
+
+    def replace(m: "__import__('re').Match[str]") -> str:
+        url = m.group(1).strip()
+        label = m.group(2)
+        # mailto: links — keep only if the email appears in source
+        if url.lower().startswith("mailto:"):
+            email = url[7:].strip().lower()
+            return m.group(0) if email and email in raw_lc else label
+        # Strip protocol + path for hostname check
+        host = url.lower()
+        if "://" in host:
+            host = host.split("://", 1)[1]
+        host = host.split("/", 1)[0]
+        if not host:
+            return label
+        if host in raw_lc or url.lower() in raw_lc:
+            return m.group(0)
+        # Allow github/linkedin generic hosts only when the slug also matches
+        slug = ""
+        if "://" in url:
+            tail = url.split("://", 1)[1].split("/", 1)
+            if len(tail) > 1:
+                slug = tail[1].split("/", 1)[0].lower()
+        if slug and slug in raw_lc:
+            return m.group(0)
+        # Hallucinated — keep the label as plain text.
+        return label
+
+    head = _HEADER_HREF_RE.sub(replace, latex[:head_end])
+    return head + latex[head_end:]
+
+
 # ---------------------------------------------------------------------------
 # Core generation pipeline (iterator)
 # ---------------------------------------------------------------------------
@@ -301,6 +352,9 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
             log_en.append("Running quality checker (diagnostic only)…")
             yield _progress_event(log_en)
             q_issues = _run_checker_llm(client, checker_sys, latex)
+        resp = resp.model_copy(
+            update={"latex_document": _strip_hallucinated_header_links(resp.latex_document, raw)}
+        )
         final = resp.model_copy(
             update={
                 "pdf_page_count": pc,
@@ -320,6 +374,9 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
     if max_rev <= 0:
         log_en.append("1-page enforcement is off (RESUME_ONE_PAGE_MAX_REVISIONS=0).")
         yield _progress_event(log_en)
+        resp = resp.model_copy(
+            update={"latex_document": _strip_hallucinated_header_links(resp.latex_document, raw)}
+        )
         final = resp.model_copy(
             update={
                 "pdf_page_count": None,
@@ -439,6 +496,9 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                 )
                 log_en.append("PDF compile failed on server; cannot verify or enforce 1 page.")
                 yield _progress_event(log_en)
+                resp = resp.model_copy(
+                    update={"latex_document": _strip_hallucinated_header_links(resp.latex_document, raw)}
+                )
                 final = resp.model_copy(
                     update=_finish_fields(
                         pdf_page_count=None,
@@ -459,6 +519,9 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                     )
                     log_en.append(f"Still {pages} page(s) after maximum revisions.")
                     yield _progress_event(log_en)
+                    resp = resp.model_copy(
+                        update={"latex_document": _strip_hallucinated_header_links(resp.latex_document, raw)}
+                    )
                     final = resp.model_copy(
                         update=_finish_fields(pdf_page_count=pages, one_page_enforced=False, layout_underfull=None)
                     )
@@ -507,6 +570,7 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                         detail="Model returned invalid JSON on one-page revision. Retry.",
                     ) from e
 
+                _inject_preview_coaching_from_previous(data, resp)
                 resp, blob = _coerce_any_response(
                     data,
                     client=client,
@@ -616,6 +680,7 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                                 )
                                 resp, latex, pdf = resp_snap, latex_snap, pdf_snap
                                 break
+                            _inject_preview_coaching_from_previous(data, resp)
                             try:
                                 if structured:
                                     resp_try, blob_try = _coerce_any_response(
@@ -678,6 +743,9 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                 )
                 if len(log_en) > _n:
                     yield _progress_event(log_en)
+                resp = resp.model_copy(
+                    update={"latex_document": _strip_hallucinated_header_links(resp.latex_document, raw)}
+                )
                 final = resp.model_copy(
                     update=_finish_fields(
                         pdf_page_count=pages,
@@ -706,6 +774,9 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                 q_done: list[dict[str, Any]] | None = None
                 if settings.resume_quality_checker:
                     q_done = _run_checker_llm(client, checker_sys, latex)
+                resp = resp.model_copy(
+                    update={"latex_document": _strip_hallucinated_header_links(resp.latex_document, raw)}
+                )
                 final = resp.model_copy(
                     update=_finish_fields(
                         pdf_page_count=pages,
@@ -753,6 +824,7 @@ def iterate_generate_progress(raw: str, page_policy: PagePolicy) -> Iterator[dic
                     detail="Model returned invalid JSON on density expand. Retry.",
                 ) from e
 
+            _inject_preview_coaching_from_previous(data, resp)
             resp, blob = _coerce_any_response(
                 data,
                 client=client,
@@ -1043,3 +1115,38 @@ def resume_generate_from_structured(body: GenerateFromStructuredBody):
             yield (json.dumps(err, ensure_ascii=False) + "\n").encode("utf-8")
 
     return StreamingResponse(ndjson_iter(), media_type="application/x-ndjson; charset=utf-8")
+
+
+@router.post("/resume/render-only")
+def resume_render_only(body: GenerateFromStructuredBody):
+    """Deterministic render: structured resume_data → LaTeX → compiled PDF.
+
+    No LLM calls. Used by the issue card "Apply fix" UX so a single bullet
+    rewrite swaps in and the PDF refreshes within ~3 s of Docker compile.
+    """
+    try:
+        rd = parse_resume_data(body.resume_data)
+    except PydValidationError as e:
+        # e.errors() may contain non-JSON-serializable objects (Pydantic stores
+        # the original ValueError under ctx.error). Stringify safely.
+        errs = json.loads(json.dumps(e.errors(), default=str))
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "resume_data_invalid", "errors": errs},
+        ) from e
+
+    from features.generation.structured_resume import build_latex_document
+
+    try:
+        latex = build_latex_document(rd)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+    latex = sanitize_latex_for_overleaf(sanitize_unicode_for_latex(latex))
+    pdf, err_detail = compile_latex_to_pdf(latex)
+    if not pdf:
+        msg = json.loads(json.dumps(err_detail or {"error": "compile_failed"}, default=str))
+        raise HTTPException(status_code=502, detail=msg)
+    from fastapi.responses import Response
+
+    return Response(content=pdf, media_type="application/pdf")

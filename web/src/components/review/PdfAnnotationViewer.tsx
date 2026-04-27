@@ -9,15 +9,15 @@ import type { ReviewIssue, IssueSeverity } from "@/lib/types";
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 const SEV_COLORS: Record<IssueSeverity, string> = {
-  critical: "rgba(239, 68, 68, 0.25)",
-  moderate: "rgba(234, 179, 8, 0.25)",
-  minor: "rgba(56, 189, 248, 0.15)",
+  critical: "var(--error-bg)",
+  moderate: "var(--warn-bg)",
+  minor: "var(--success-bg)",
 };
 
 const SEV_BORDER: Record<IssueSeverity, string> = {
-  critical: "rgba(239, 68, 68, 0.6)",
-  moderate: "rgba(234, 179, 8, 0.6)",
-  minor: "rgba(56, 189, 248, 0.4)",
+  critical: "var(--error)",
+  moderate: "var(--warn)",
+  minor: "var(--success)",
 };
 
 interface HighlightRect {
@@ -119,13 +119,10 @@ export default function PdfAnnotationViewer({
     setHighlights(rects);
   }, [issues]);
 
-  const handlePageRender = useCallback(
-    () => {
-      const timer = setTimeout(() => findHighlightsInTextLayer(), 300);
-      return () => clearTimeout(timer);
-    },
-    [findHighlightsInTextLayer]
-  );
+  const handlePageRender = useCallback(() => {
+    const timer = setTimeout(() => findHighlightsInTextLayer(), 300);
+    return () => clearTimeout(timer);
+  }, [findHighlightsInTextLayer]);
 
   useEffect(() => {
     if (!selectedIssueId || !containerRef.current) return;
@@ -153,36 +150,24 @@ export default function PdfAnnotationViewer({
   }, [highlights, issueMap]);
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-zinc-800 bg-white">
-      <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 bg-zinc-50 px-4 py-2">
-        <span className="text-xs font-semibold text-zinc-600">Resume PDF</span>
-        <div className="flex items-center gap-3 text-[10px] text-zinc-500">
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: SEV_COLORS.critical }} />
-            Critical
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: SEV_COLORS.moderate }} />
-            Moderate
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: SEV_COLORS.minor }} />
-            Minor
-          </span>
-        </div>
-      </div>
-
-      <div ref={containerRef} className="flex-1 overflow-y-auto bg-zinc-100 p-6">
+    <div
+      className="flex h-full flex-col overflow-hidden rounded-lg"
+      style={{ background: "var(--canvas-alt)", border: "1px solid var(--border)" }}
+    >
+      <div ref={containerRef} className="flex-1 overflow-y-auto p-6">
         <Document
           file={pdfUrl}
           onLoadSuccess={({ numPages: n }) => setNumPages(n)}
           loading={
             <div className="flex items-center justify-center py-20">
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
+              <div
+                className="h-5 w-5 animate-spin rounded-full border-2 border-t-transparent"
+                style={{ borderColor: "var(--accent)", borderTopColor: "transparent" }}
+              />
             </div>
           }
           error={
-            <div className="py-20 text-center text-sm text-zinc-500">
+            <div className="py-20 text-center text-sm" style={{ color: "var(--fg-4)" }}>
               Failed to load PDF. Try re-uploading.
             </div>
           }
@@ -201,7 +186,7 @@ export default function PdfAnnotationViewer({
                 <Page
                   pageNumber={pageNum}
                   width={pageWidth}
-                  onRenderSuccess={() => handlePageRender(pageNum)}
+                  onRenderSuccess={() => handlePageRender()}
                   renderTextLayer={true}
                   renderAnnotationLayer={false}
                 />

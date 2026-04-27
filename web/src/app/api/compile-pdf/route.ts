@@ -1,18 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
+import { longFetch } from "@/lib/long-fetch";
+
+export const maxDuration = 600;
 
 const BACKEND = process.env.API_BACKEND_URL || "http://127.0.0.1:8000";
 
 export async function POST(req: NextRequest) {
-  let body: unknown;
+  let bodyText: string;
   try {
-    body = await req.json();
+    bodyText = await req.text();
+    JSON.parse(bodyText);
   } catch {
     return NextResponse.json({ detail: "Invalid JSON" }, { status: 400 });
   }
-  const r = await fetch(`${BACKEND}/compile-pdf`, {
+  const r = await longFetch(`${BACKEND}/compile-pdf`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: bodyText,
   });
   if (r.ok) {
     const buf = await r.arrayBuffer();
