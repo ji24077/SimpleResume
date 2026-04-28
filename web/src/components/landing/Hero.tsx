@@ -22,7 +22,7 @@ export default function Hero() {
             style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}
           >
             <span style={{ width: 6, height: 6, background: "var(--accent)", borderRadius: "50%" }} />
-            Drop a draft. Get a roast.
+            Upload your résumé. Get it optimized.
           </div>
           <h1
             className="font-display"
@@ -30,8 +30,7 @@ export default function Hero() {
           >
             Your résumé,
             <br />
-            roasted then{" "}
-            <em style={{ color: "var(--accent)", fontStyle: "italic", fontWeight: 500 }}>rebuilt</em>.
+            <em style={{ color: "var(--accent)", fontStyle: "italic", fontWeight: 500 }}>simplified</em>.
           </h1>
           <p
             style={{
@@ -63,7 +62,7 @@ export default function Hero() {
                 textTransform: "uppercase",
               }}
             >
-              roast → rewrite → render
+              review → rewrite → render
             </div>
           </div>
           <div style={{ transform: "scale(0.92)", transformOrigin: "top right" }}>

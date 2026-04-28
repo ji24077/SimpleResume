@@ -6,7 +6,7 @@ export default function Logo() {
   return (
     <Link href="/" className="logo">
       <span className="logo-mark" aria-hidden />
-      ResumeRoast
+      SimpleResume
     </Link>
   );
 }

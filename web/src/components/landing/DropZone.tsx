@@ -209,7 +209,7 @@ export default function DropZone() {
               disabled={loading || !paste.trim()}
               onClick={() => startFlow(null, paste)}
             >
-              {loading ? "Working…" : "Roast it →"}
+              {loading ? "Working…" : "Rewrite it →"}
             </button>
           </div>
         </div>

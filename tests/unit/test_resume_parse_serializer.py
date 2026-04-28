@@ -162,3 +162,45 @@ def test_serializer_output_ends_with_single_newline() -> None:
     text = resume_data_to_source_text(_build())
     assert text.endswith("\n")
     assert not text.endswith("\n\n")
+
+
+def test_serializer_emits_publications_block() -> None:
+    raw = {
+        "header": {"name": "X"},
+        "skills": {"languages": ["Python"], "frameworks": [], "tools": []},
+        "publications": [
+            {
+                "title": "Paper One",
+                "authors": ["A. Anand", "Z. Tu"],
+                "self_name": "A. Anand",
+                "venue": "ECCV",
+                "venue_short": "ECCV 2026",
+                "year": "2026",
+                "type": "conference",
+                "status": "Under review at",
+                "link": "arXiv:2603.14957",
+            }
+        ],
+    }
+    data = parse_resume_data(raw)
+    text = resume_data_to_source_text(data)
+    assert "=== PUBLICATIONS ===" in text
+    assert "Title: Paper One" in text
+    assert "Authors: A. Anand, Z. Tu" in text
+    assert "Self: A. Anand" in text
+    assert "Venue: ECCV" in text
+    assert "VenueShort: ECCV 2026" in text
+    assert "Year: 2026" in text
+    assert "Type: conference" in text
+    assert "Status: Under review at" in text
+    assert "Link: arXiv:2603.14957" in text
+
+
+def test_serializer_skips_publications_when_empty() -> None:
+    raw = {
+        "header": {"name": "X"},
+        "skills": {"languages": ["Python"], "frameworks": [], "tools": []},
+    }
+    data = parse_resume_data(raw)
+    text = resume_data_to_source_text(data)
+    assert "=== PUBLICATIONS ===" not in text

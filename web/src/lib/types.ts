@@ -219,6 +219,18 @@ export type ProjectEntry = {
   bullets: string[];
 };
 
+export type PublicationEntry = {
+  title: string;
+  authors: string[];
+  self_name: string;
+  venue: string;
+  venue_short: string;
+  year: string;
+  type: string;
+  status: string;
+  link: string;
+};
+
 export type SkillsBlock = {
   languages: string[];
   frameworks: string[];
@@ -229,6 +241,7 @@ export type ResumeData = {
   header: ResumeHeader;
   education: EducationEntry[];
   experience: ExperienceEntry[];
+  publications: PublicationEntry[];
   projects: ProjectEntry[];
   skills: SkillsBlock;
 };
@@ -242,6 +255,7 @@ export const EMPTY_RESUME_DATA: ResumeData = {
   header: { name: "", phone: "", email: "", links: [] },
   education: [],
   experience: [],
+  publications: [],
   projects: [],
   skills: { languages: [], frameworks: [], tools: [] },
 };

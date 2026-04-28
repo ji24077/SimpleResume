@@ -10,7 +10,7 @@ type ThemeContextValue = {
   toggleTheme: () => void;
 };
 
-const STORAGE_KEY = "resumeroast-theme";
+const STORAGE_KEY = "simpleresume-theme";
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 function readInitialTheme(): Theme {
