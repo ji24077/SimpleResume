@@ -9,8 +9,16 @@ from resume_service.models.resume import (
     PreviewSection,
 )
 from resume_service.models.coaching import CoachingItem, CoachingSection
+from resume_service.models.bullet_chat import (
+    BulletChatMessage,
+    BulletChatRequest,
+    BulletChatResult,
+)
 
 __all__ = [
+    "BulletChatMessage",
+    "BulletChatRequest",
+    "BulletChatResult",
     "CoachingItem",
     "CoachingSection",
     "GenerateFromStructuredBody",

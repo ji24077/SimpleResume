@@ -1,11 +1,18 @@
-import type { GenerateResponse, PagePolicy, ParseResponse } from "@/lib/types";
+import type {
+  BulletChatMessage,
+  BulletChatResult,
+  GenerateResponse,
+  PagePolicy,
+  ParseResponse,
+} from "@/lib/types";
 
 export type ProgressHandler = (message: string | null) => void;
 
-export async function readStreamResult(
+/** Generic NDJSON stream reader. Yields progress events and returns the final `result.data`. */
+export async function readNdjsonResult<T>(
   res: Response,
   onProgress?: ProgressHandler,
-): Promise<GenerateResponse> {
+): Promise<T> {
   if (!res.ok) {
     const json = await res.json().catch(() => ({}));
     throw new Error(
@@ -19,7 +26,7 @@ export async function readStreamResult(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  let finalResult: GenerateResponse | null = null;
+  let finalResult: T | null = null;
 
   const consumeLine = (line: string) => {
     const trimmed = line.trim();
@@ -28,7 +35,7 @@ export async function readStreamResult(
       type?: string;
       message?: string;
       message_en?: string;
-      data?: GenerateResponse;
+      data?: T;
       detail?: string;
     };
     try {
@@ -38,10 +45,10 @@ export async function readStreamResult(
     }
     if (ev.type === "progress") {
       onProgress?.(ev.message ?? ev.message_en ?? null);
-    } else if (ev.type === "result" && ev.data) {
-      finalResult = ev.data as GenerateResponse;
+    } else if (ev.type === "result" && ev.data !== undefined) {
+      finalResult = ev.data as T;
     } else if (ev.type === "error") {
-      throw new Error(ev.detail ?? "Generate failed");
+      throw new Error(ev.detail ?? "Stream failed");
     }
   };
 
@@ -57,6 +64,51 @@ export async function readStreamResult(
 
   if (!finalResult) throw new Error("No result from stream");
   return finalResult;
+}
+
+export async function readStreamResult(
+  res: Response,
+  onProgress?: ProgressHandler,
+): Promise<GenerateResponse> {
+  return readNdjsonResult<GenerateResponse>(res, onProgress);
+}
+
+export type BulletChatRequest = {
+  issueId: string;
+  originalText: string;
+  /** Reviewer-vetted starting suggestion (issue.suggested_text). Frozen across turns. */
+  baselineSuggestion: string;
+  /** Mutating UI-side suggestion. Sent for backward compat; server prefers baselineSuggestion. */
+  currentSuggestion: string;
+  userMessage: string;
+  history: BulletChatMessage[];
+  sectionId?: string;
+  bulletId?: string;
+  severity?: string;
+  category?: string;
+};
+
+export async function submitBulletChat(
+  req: BulletChatRequest,
+  onProgress?: ProgressHandler,
+): Promise<BulletChatResult> {
+  const res = await fetch("/api/bullet-chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      issue_id: req.issueId,
+      original_text: req.originalText,
+      baseline_suggestion: req.baselineSuggestion,
+      current_suggestion: req.currentSuggestion,
+      user_message: req.userMessage,
+      history: req.history,
+      section_id: req.sectionId ?? null,
+      bullet_id: req.bulletId ?? null,
+      severity: req.severity ?? null,
+      category: req.category ?? null,
+    }),
+  });
+  return readNdjsonResult<BulletChatResult>(res, onProgress);
 }
 
 export type ContactFields = {

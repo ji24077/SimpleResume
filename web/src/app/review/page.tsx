@@ -97,14 +97,15 @@ function ReviewPageInner() {
   );
 
   const onApplyIssue = useCallback(
-    async (issue: ReviewIssue): Promise<boolean> => {
+    async (issue: ReviewIssue, suggestedTextOverride?: string): Promise<boolean> => {
       const rd = session.resumeData;
       if (!rd) throw new Error("No structured résumé to patch.");
-      if (!issue.suggested_text) return false;
+      const suggested = suggestedTextOverride ?? issue.suggested_text;
+      if (!suggested) return false;
       const { rd: patched, found } = applyBulletRewrite(
         rd,
         issue.original_text,
-        issue.suggested_text,
+        suggested,
       );
       if (!found) return false;
       session.setResumeData(patched);

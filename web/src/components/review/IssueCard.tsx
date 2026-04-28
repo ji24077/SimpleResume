@@ -1,7 +1,8 @@
 "use client";
 
-import type { IssueSeverity, ReviewIssue } from "@/lib/types";
+import type { BulletChatMessage, IssueSeverity, ReviewIssue } from "@/lib/types";
 import DiffBlock from "./DiffBlock";
+import IssueChatPanel from "./IssueChatPanel";
 
 type Props = {
   issue: ReviewIssue;
@@ -16,6 +17,12 @@ type Props = {
   onUndo?: () => void;
   undoLabel?: string;
   index: number;
+  /** Effective suggestion shown in diff & applied on click. Falls back to `issue.suggested_text`. */
+  currentSuggestion?: string;
+  chatHistory?: BulletChatMessage[];
+  onSuggestionUpdate?: (text: string) => void;
+  onHistoryUpdate?: (next: BulletChatMessage[]) => void;
+  onResetSuggestion?: () => void;
 };
 
 const SEV_COLOR: Record<IssueSeverity, string> = {
@@ -56,11 +63,20 @@ export default function IssueCard({
   onUndo,
   undoLabel = "Undo",
   index,
+  currentSuggestion,
+  chatHistory,
+  onSuggestionUpdate,
+  onHistoryUpdate,
+  onResetSuggestion,
 }: Props) {
   const color = SEV_COLOR[issue.severity];
   const bg = SEV_BG[issue.severity];
-  const hasRewrite = !!issue.suggested_text && issue.suggested_text !== issue.original_text;
+  const effectiveSuggestion = currentSuggestion ?? issue.suggested_text;
+  const isRefined = !!currentSuggestion && currentSuggestion !== issue.suggested_text;
+  const hasRewrite = !!effectiveSuggestion && effectiveSuggestion !== issue.original_text;
   const resolved = applied || dismissed;
+  const canChat =
+    !resolved && !!issue.suggested_text && !!onHistoryUpdate && !!onSuggestionUpdate;
 
   return (
     <div
@@ -106,6 +122,20 @@ export default function IssueCard({
               LLM rewrite
             </span>
           )}
+          {isRefined && (
+            <span
+              className="pill"
+              style={{
+                background: "var(--warn-bg)",
+                color: "var(--warn)",
+                borderColor: "transparent",
+                flexShrink: 0,
+              }}
+              title="Refined via chat"
+            >
+              Refined
+            </span>
+          )}
           <span
             className="font-mono muted"
             title={issue.location_label}
@@ -126,10 +156,10 @@ export default function IssueCard({
       </div>
 
       {hasRewrite ? (
-        <DiffBlock original={issue.original_text} suggested={issue.suggested_text} />
-      ) : issue.suggested_text ? (
+        <DiffBlock original={issue.original_text} suggested={effectiveSuggestion} />
+      ) : effectiveSuggestion ? (
         <div style={{ fontSize: 13, color: "var(--fg-1)", lineHeight: 1.5, marginBottom: 6 }}>
-          {issue.suggested_text}
+          {effectiveSuggestion}
         </div>
       ) : null}
       {issue.description && (
@@ -189,7 +219,37 @@ export default function IssueCard({
           >
             Dismiss
           </button>
+          {isRefined && onResetSuggestion && (
+            <button
+              type="button"
+              className="btn btn-soft btn-sm"
+              disabled={pending}
+              onClick={(e) => {
+                e.stopPropagation();
+                onResetSuggestion();
+              }}
+              title="Discard chat-refined rewrite"
+            >
+              Reset
+            </button>
+          )}
         </div>
+      )}
+
+      {selected && canChat && onHistoryUpdate && onSuggestionUpdate && (
+        <IssueChatPanel
+          issueId={issue.id}
+          originalText={issue.original_text}
+          baselineSuggestion={issue.suggested_text}
+          currentSuggestion={effectiveSuggestion}
+          history={chatHistory ?? []}
+          sectionId={issue.location?.section_id}
+          bulletId={issue.location?.bullet_id}
+          severity={issue.severity}
+          category={issue.category}
+          onHistoryChange={onHistoryUpdate}
+          onProposedTextChange={onSuggestionUpdate}
+        />
       )}
 
       {resolved && onUndo && (

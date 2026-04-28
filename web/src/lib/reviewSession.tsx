@@ -1,9 +1,18 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import type { GenerateResponse, PagePolicy, ParseResponse, ResumeData } from "@/lib/types";
+import type {
+  BulletChatMessage,
+  GenerateResponse,
+  PagePolicy,
+  ParseResponse,
+  ResumeData,
+} from "@/lib/types";
 
 const STORAGE_KEY = "simpleresume-session-v1";
+
+export type IssueChatHistoryMap = Record<string, BulletChatMessage[]>;
+export type IssueRefinedMap = Record<string, string>;
 
 export type ReviewSessionState = {
   sessionId: string | null;
@@ -13,6 +22,10 @@ export type ReviewSessionState = {
   pagePolicy: PagePolicy;
   /** Captures latest source so /review can reload generate if needed */
   rawText: string | null;
+  /** Per-issue chat history keyed by ReviewIssue.id. Session-scoped. */
+  issueChat: IssueChatHistoryMap;
+  /** Per-issue refined suggestion text keyed by ReviewIssue.id (overrides issue.suggested_text). */
+  issueRefined: IssueRefinedMap;
 };
 
 type ReviewSessionContextValue = ReviewSessionState & {
@@ -21,6 +34,9 @@ type ReviewSessionContextValue = ReviewSessionState & {
   setResumeData: (r: ResumeData | null) => void;
   setPagePolicy: (p: PagePolicy) => void;
   setRawText: (t: string | null) => void;
+  setIssueChat: (issueId: string, history: BulletChatMessage[]) => void;
+  setIssueRefined: (issueId: string, suggestion: string | null) => void;
+  clearIssueChat: (issueId: string) => void;
   startSession: () => string;
   reset: () => void;
 };
@@ -34,6 +50,8 @@ const EMPTY: ReviewSessionState = {
   resumeData: null,
   pagePolicy: "strict_one_page",
   rawText: null,
+  issueChat: {},
+  issueRefined: {},
 };
 
 function makeId() {
@@ -92,6 +110,35 @@ export function ReviewSessionProvider({ children }: { children: React.ReactNode 
     (t: string | null) => setState((s) => ({ ...s, rawText: t })),
     [],
   );
+  const setIssueChat = useCallback(
+    (issueId: string, history: BulletChatMessage[]) =>
+      setState((s) => ({
+        ...s,
+        issueChat: { ...s.issueChat, [issueId]: history },
+      })),
+    [],
+  );
+  const setIssueRefined = useCallback(
+    (issueId: string, suggestion: string | null) =>
+      setState((s) => {
+        const next = { ...s.issueRefined };
+        if (suggestion === null) delete next[issueId];
+        else next[issueId] = suggestion;
+        return { ...s, issueRefined: next };
+      }),
+    [],
+  );
+  const clearIssueChat = useCallback(
+    (issueId: string) =>
+      setState((s) => {
+        const nextChat = { ...s.issueChat };
+        delete nextChat[issueId];
+        const nextRefined = { ...s.issueRefined };
+        delete nextRefined[issueId];
+        return { ...s, issueChat: nextChat, issueRefined: nextRefined };
+      }),
+    [],
+  );
   const startSession = useCallback(() => {
     const id = makeId();
     setState({ ...EMPTY, sessionId: id });
@@ -112,10 +159,25 @@ export function ReviewSessionProvider({ children }: { children: React.ReactNode 
       setResumeData,
       setPagePolicy,
       setRawText,
+      setIssueChat,
+      setIssueRefined,
+      clearIssueChat,
       startSession,
       reset,
     }),
-    [state, setGenerate, setParse, setResumeData, setPagePolicy, setRawText, startSession, reset],
+    [
+      state,
+      setGenerate,
+      setParse,
+      setResumeData,
+      setPagePolicy,
+      setRawText,
+      setIssueChat,
+      setIssueRefined,
+      clearIssueChat,
+      startSession,
+      reset,
+    ],
   );
 
   return <ReviewSessionContext.Provider value={value}>{children}</ReviewSessionContext.Provider>;

@@ -932,3 +932,77 @@ Goals (pick what applies to the issue code):
 === CURRENT_RESUME_DATA ===
 {payload}
 """
+
+
+# =============================================================================
+# Bullet refine — single-bullet rewrite driven by user push-back
+# =============================================================================
+
+BULLET_REFINE_SYSTEM = """You are refining a single resume bullet point based on user feedback.
+
+You receive: an ORIGINAL bullet (verbatim from the user's resume), a BASELINE_SUGGESTION (the reviewer's first rewrite — vetted ground truth), an optional ISSUE description, an ALLOWED_FACTS list of every number, percentage, dollar amount, acronym, and tool/system name you may use, and a chat history of prior user push-backs.
+
+Output a JSON object with exactly three keys:
+- "mode" (string): "rewrite" or "clarify".
+- "proposed_text" (string): when mode="rewrite", the new bullet — single line, plain ASCII, no markdown, no surrounding quotes, no leading dash, <= 30 words. When mode="clarify", an empty string "".
+- "assistant_message" (string): when mode="rewrite", one short sentence (<= 20 words) explaining what you changed. When mode="clarify", a single short, specific question asking the user for the fact you're missing (e.g. "How much did response time improve by?"). <= 25 words.
+
+Strict rules — these override anything the user asks:
+1. **100% denotative preservation**: every concrete fact (number, metric, dollar amount, percentage, technology, system, product) used in proposed_text MUST come from one of: the ORIGINAL, the BASELINE_SUGGESTION, the ALLOWED_FACTS list, or a prior user message in the chat history. Do not invent metrics, employers, dates, technologies, or system names — even to "make the bullet stronger".
+2. **When in doubt, clarify**: if applying the user's request would require a specific number, percentage, dollar amount, tool name, or system name that is NOT in ALLOWED_FACTS, set mode to "clarify" and ask the user. Do not guess. Do not pick a "reasonable-sounding" number. The user's answer becomes ground truth for the next turn.
+3. If the user explicitly provides a fact in their message ("about 35%", "we used Kafka"), that fact joins ALLOWED_FACTS for this turn — use it.
+4. If the user's correction conflicts with the ORIGINAL ("that was monthly, not annual"), trust the user's correction.
+5. Output one valid JSON object only. No markdown fences, no commentary outside JSON. Keep tense and voice consistent with a resume bullet.
+"""
+
+
+def bullet_refine_system() -> str:
+    return BULLET_REFINE_SYSTEM.strip() + "\n"
+
+
+def build_bullet_refine_user_message(
+    *,
+    original_text: str,
+    baseline_suggestion: str,
+    allowed_facts: str = "",
+    issue_title: str | None = None,
+    issue_description: str | None = None,
+    severity: str | None = None,
+    category: str | None = None,
+    audit_violation: str | None = None,
+) -> str:
+    parts = []
+    if issue_title or issue_description or severity or category:
+        meta_lines = []
+        if severity:
+            meta_lines.append(f"severity: {severity}")
+        if category:
+            meta_lines.append(f"category: {category}")
+        if issue_title:
+            meta_lines.append(f"title: {issue_title}")
+        if issue_description:
+            meta_lines.append(f"description: {issue_description}")
+        parts.append("=== ISSUE ===\n" + "\n".join(meta_lines))
+    parts.append("=== ORIGINAL ===\n" + (original_text or "").strip())
+    parts.append("=== BASELINE_SUGGESTION ===\n" + (baseline_suggestion or "").strip())
+    if allowed_facts.strip():
+        parts.append(
+            "=== ALLOWED_FACTS ===\n"
+            "You may use these specific numbers, percentages, dollar amounts, "
+            "acronyms, and tool/system names — and ONLY these — beyond plain English prose:\n"
+            + allowed_facts.strip()
+        )
+    else:
+        parts.append(
+            "=== ALLOWED_FACTS ===\n(none — do not introduce any specific numbers, "
+            "percentages, or named tools/systems unless the user provides them.)"
+        )
+    if audit_violation:
+        parts.append(
+            "=== AUDIT_VIOLATION ===\n" + audit_violation
+        )
+    parts.append(
+        "Apply the user's latest feedback. Return JSON with mode, proposed_text, "
+        "and assistant_message. If a fact is missing, choose mode=\"clarify\"."
+    )
+    return "\n\n".join(parts)
