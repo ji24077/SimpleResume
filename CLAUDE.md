@@ -47,6 +47,8 @@ cd api && uv run pytest ../tests/unit/test_latex_sanitize.py -k "test_name"
 # Or from repo root via Makefile:
 make test-unit
 make test
+make lint           # ESLint via web/
+make health         # curl GET /health and pretty-print
 ```
 
 `pytest.ini` sets `pythonpath=api` so imports resolve without installing the package.
@@ -106,6 +108,8 @@ User input (text / PDF upload)
 | `api/resume_service/routers/coaching.py` | Per-section coaching notes endpoint |
 | `api/resume_service/routers/resume_score.py` | Resume scoring endpoint |
 | `api/resume_service/routers/resume_review.py` | PDF annotation review (inline highlights on PDF) |
+| `api/resume_service/routers/bullet_chat.py` | POST /resume/bullet-chat — per-issue refine chat (gated by `FEATURE_BULLET_CHAT`) |
+| `api/resume_service/services/bullet_chat_service.py` | `refine_bullet` + ALLOWED_FACTS audit / clarify-mode retry |
 | `api/resume_service/routers/_helpers.py` | Shared models (GenerateResponse, etc.), coerce/repair helpers |
 | `api/features/generation/prompts.py` | All LLM system/user prompts (generator, fixer, densify, ATS checker) |
 | `api/features/generation/structured_resume.py` | Optional Pydantic schema + LaTeX builder (`RESUME_STRUCTURED_LATEX=true`) |
@@ -115,7 +119,13 @@ User input (text / PDF upload)
 | `api/features/resume_pipeline/pipeline/` | Per-gate modules: `lint`, `compile`, `pdf_checks`, `ats_check`, `fixer_llm`, `checker_llm` |
 | `web/src/app/page.tsx` | Main upload + generation UI |
 | `web/src/app/latex/page.tsx` | LaTeX-only compile interface |
+| `web/src/app/review/page.tsx` | Resume review UI (PDF annotation + issues panel) |
+| `web/src/app/edit/page.tsx` | Post-generation structured editor |
 | `web/src/app/api/generate-stream/route.ts` | Streaming proxy to backend |
+| `web/src/components/builder/` | `ResumeForm` + per-section editors (Experience, Projects, Publications, …) |
+| `web/src/components/review/` | Diff/issue cards, `PdfAnnotationViewer`, `VerifyParseDrawer`, score chip |
+| `web/src/components/landing/` | Hero, drop zone, marketing-page pieces |
+| `web/src/components/shell/` | Nav, logo, status bar, theme toggle (app chrome) |
 | `web/src/lib/types.ts` | `GenerateResponse` TypeScript type |
 
 ### Non-obvious design decisions
@@ -131,6 +141,8 @@ User input (text / PDF upload)
 **LaTeX sanitization** — The sanitizer in `compile_pdf.py` fixes double-backslashes, empty `\href{}{}`, missing backslashes on macros, unmatched `\begin{center}`, and ensures `\resumeProjectHeading` is wrapped in `\resumeSubHeadingListStart`…`\resumeSubHeadingListEnd`. This logic is delicate — do not modify without running the full unit test suite.
 
 **Extension architecture** — New optional features go under `extensions/` with `FEATURE_*` env-var gates. Core must not import extensions (one-way dependency enforced by convention).
+
+**Bullet-chat anti-drift** — `POST /resume/bullet-chat` (gated by `FEATURE_BULLET_CHAT`) lets users push back on a single review issue's rewrite over multiple turns. To prevent fact drift across turns, the service: (1) freezes `original_text` + initial `suggested_text` as the immutable baseline (the mutating UI suggestion is *not* sent as fact); (2) builds an `ALLOWED_FACTS` whitelist from baseline + every prior user message; (3) the LLM may return `mode: "rewrite"` or `mode: "clarify"` (asks the user for a missing fact instead of guessing); (4) a server-side audit regex-checks numbers/percentages/acronyms in the proposed bullet against the whitelist — if invented, retries once forcing clarify mode, then falls back to a hard clarify response. Fabricated facts cannot reach the UI.
 
 ### Core-protected paths (CI blocks PRs without `allow-core-change` label)
 - `api/features/pdf_rendering/compile_pdf.py`
@@ -159,6 +171,7 @@ Source of truth: `.github/core-protected-paths.txt` (enforced by `.github/workfl
 | `RESUME_QUALITY_CHECKER` | `false` | Enable optional diagnostic checker pass |
 | `RESUME_STRUCTURED_LATEX` | `false` | Use Pydantic-schema LaTeX builder |
 | `RESUME_SCHEMA_HEAL_MAX` | `2` | Max schema self-heal retries (0–8) |
+| `FEATURE_BULLET_CHAT` | `false` | Enable `/resume/bullet-chat` per-issue refine endpoint |
 | `API_BACKEND_URL` | `http://127.0.0.1:8000` | Backend URL for frontend proxy (`web/.env.local`) |
 
 API loads from `api/.env` first, then falls back to repo-root `.env`. Frontend uses `web/.env.local`.

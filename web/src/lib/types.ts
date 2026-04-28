@@ -259,3 +259,21 @@ export const EMPTY_RESUME_DATA: ResumeData = {
   projects: [],
   skills: { languages: [], frameworks: [], tools: [] },
 };
+
+// --- Bullet chat (per-issue push-back) ---
+
+export type BulletChatRole = "user" | "assistant";
+
+export type BulletChatMessage = {
+  role: BulletChatRole;
+  content: string;
+};
+
+export type BulletChatMode = "rewrite" | "clarify";
+
+export type BulletChatResult = {
+  /** "rewrite" → proposed_text is a refined bullet. "clarify" → assistant_message is a question. */
+  mode: BulletChatMode;
+  proposed_text: string;
+  assistant_message: string;
+};

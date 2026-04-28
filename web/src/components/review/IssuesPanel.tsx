@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { ReviewIssue } from "@/lib/types";
+import type { BulletChatMessage, ReviewIssue } from "@/lib/types";
+import { useReviewSession } from "@/lib/reviewSession";
 import IssueCard from "./IssueCard";
 
 type Props = {
@@ -9,8 +10,13 @@ type Props = {
   loading: boolean;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
-  /** Apply: returns true if the resume was patched and the PDF re-rendered. */
-  onApplyIssue?: (issue: ReviewIssue) => Promise<boolean> | boolean;
+  /** Apply: returns true if the resume was patched and the PDF re-rendered. The
+   *  optional second arg is the chat-refined suggestion text to use instead of
+   *  `issue.suggested_text`. */
+  onApplyIssue?: (
+    issue: ReviewIssue,
+    suggestedTextOverride?: string,
+  ) => Promise<boolean> | boolean;
   /** Undo a previously-applied fix — swap the suggested text back to original in the resume. */
   onUndoApply?: (issue: ReviewIssue) => Promise<boolean> | boolean;
 };
@@ -27,6 +33,8 @@ export default function IssuesPanel({
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [errorById, setErrorById] = useState<Record<string, string>>({});
+  const { issueChat, issueRefined, setIssueChat, setIssueRefined, clearIssueChat } =
+    useReviewSession();
 
   const issueById = useMemo(() => {
     const m = new Map<string, ReviewIssue>();
@@ -53,7 +61,8 @@ export default function IssuesPanel({
     setPendingId(issue.id);
     clearError(issue.id);
     try {
-      const ok = onApplyIssue ? await onApplyIssue(issue) : true;
+      const override = issueRefined[issue.id];
+      const ok = onApplyIssue ? await onApplyIssue(issue, override) : true;
       if (ok) {
         setAppliedIds((s) => new Set([...s, issue.id]));
       } else {
@@ -71,6 +80,14 @@ export default function IssuesPanel({
       setPendingId(null);
     }
   };
+
+  const cardChatProps = (iss: ReviewIssue) => ({
+    currentSuggestion: issueRefined[iss.id] ?? iss.suggested_text,
+    chatHistory: (issueChat[iss.id] ?? []) as BulletChatMessage[],
+    onSuggestionUpdate: (text: string) => setIssueRefined(iss.id, text),
+    onHistoryUpdate: (next: BulletChatMessage[]) => setIssueChat(iss.id, next),
+    onResetSuggestion: () => clearIssueChat(iss.id),
+  });
 
   const undoApply = async (issue: ReviewIssue) => {
     setPendingId(issue.id);
@@ -166,6 +183,7 @@ export default function IssuesPanel({
             onSelect={() => onSelect(iss.id === selectedId ? null : iss.id)}
             onApply={() => apply(iss)}
             onDismiss={() => setDismissedIds((s) => new Set([...s, iss.id]))}
+            {...cardChatProps(iss)}
           />
         ))}
 
