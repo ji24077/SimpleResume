@@ -3,33 +3,29 @@
 from __future__ import annotations
 
 import json
-import os
 
 import pytest
 
 
-def _build_app_with_chat_enabled():
-    """Re-import the app with FEATURE_BULLET_CHAT=true so the router is included."""
-    os.environ["FEATURE_BULLET_CHAT"] = "true"
-    # Force-reload the modules whose state depends on the env var.
-    import importlib
-
-    import resume_service.config as cfg
-
-    importlib.reload(cfg)
-    import resume_service.app as app_module
-
-    importlib.reload(app_module)
-    return app_module.app
-
-
 @pytest.fixture
 def client_with_chat(monkeypatch):
+    """Build a fresh FastAPI app that includes the bullet-chat router.
+
+    Patches settings attributes directly (no module reload) so the test is
+    independent of whether OPENAI_API_KEY / FEATURE_BULLET_CHAT are set in
+    the environment that imported the modules.
+    """
+    from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    monkeypatch.setenv("FEATURE_BULLET_CHAT", "true")
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    app = _build_app_with_chat_enabled()
+    from resume_service.config import settings
+    from resume_service.routers import bullet_chat as bc_router
+
+    monkeypatch.setattr(settings, "feature_bullet_chat", True)
+    monkeypatch.setattr(settings, "openai_api_key", "test-key")
+
+    app = FastAPI()
+    app.include_router(bc_router.router)
 
     def fake_refine_bullet(**_kwargs):
         yield {"type": "progress", "message": "Refining bullet…"}
@@ -44,6 +40,11 @@ def client_with_chat(monkeypatch):
 
     monkeypatch.setattr(
         "resume_service.routers.bullet_chat.refine_bullet", fake_refine_bullet
+    )
+    # Avoid creating a real OpenAI client (it's instantiated even though the
+    # service-level call is monkeypatched).
+    monkeypatch.setattr(
+        "resume_service.routers.bullet_chat.get_openai_client", lambda: object()
     )
     return TestClient(app)
 
