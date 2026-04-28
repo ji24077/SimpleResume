@@ -124,6 +124,24 @@ class ProjectEntry(BaseModel):
     bullets: list[str] = Field(default_factory=list)
 
 
+class PublicationEntry(BaseModel):
+    title: str = Field(..., min_length=1)
+    authors: list[str] = Field(default_factory=list)
+    self_name: str = ""
+    """Substring within ``authors`` to bold (e.g. ``"A. Anand"``); case-insensitive match."""
+    venue: str = ""
+    """Italic full venue name (e.g. ``"European Conference on Computer Vision"``)."""
+    venue_short: str = ""
+    """Bold short venue or abbreviation (e.g. ``"ECCV 2026"``); falls back to ``year`` if empty."""
+    year: str = ""
+    type: str = ""
+    """Free text or one of journal/conference/preprint/workshop. Not enum-locked."""
+    status: str = ""
+    """E.g. ``"Under review at"``, ``"Accepted at"``, ``"Published in"``, ``"To appear at"``."""
+    link: str = ""
+    """arXiv id, DOI, or full URL (rendered as plain text — no \\href wrap)."""
+
+
 class SkillsBlock(BaseModel):
     languages: list[str] = Field(default_factory=list)
     frameworks: list[str] = Field(default_factory=list)
@@ -134,6 +152,7 @@ class ResumeData(BaseModel):
     header: ResumeHeader
     education: list[EducationEntry] = Field(default_factory=list)
     experience: list[ExperienceEntry] = Field(default_factory=list)
+    publications: list[PublicationEntry] = Field(default_factory=list)
     projects: list[ProjectEntry] = Field(default_factory=list)
     skills: SkillsBlock
 
@@ -273,6 +292,79 @@ def render_projects(entries: list[ProjectEntry]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def render_publications(entries: list[PublicationEntry]) -> str:
+    """Render Publications section using existing macros only (no preamble change).
+
+    Layout per entry:
+        \\textbf{<title>}, <authors w/ self bolded>\\newline
+        <status> \\textit{<venue> \\textbf{<short-or-year>}}. <link>.
+    Empty fields collapse cleanly.
+    """
+    if not entries:
+        return ""
+    lines = ["\\section{Publications}", "\\resumeSubHeadingListStart"]
+    for pub in entries:
+        title_tex = tex_plain(pub.title.strip())
+
+        author_parts: list[str] = []
+        self_norm = pub.self_name.strip().lower()
+        for a in pub.authors:
+            if not isinstance(a, str) or not a.strip():
+                continue
+            a_clean = a.strip()
+            a_tex = tex_plain(a_clean)
+            if self_norm and a_clean.lower() == self_norm:
+                author_parts.append(f"\\textbf{{{a_tex}}}")
+            else:
+                author_parts.append(a_tex)
+        authors_line = ", ".join(author_parts)
+
+        venue_clean = pub.venue.strip()
+        venue_tex = tex_plain(venue_clean) if venue_clean else ""
+        bold_inner = pub.venue_short.strip() or pub.year.strip()
+        bold_tex = tex_plain(bold_inner) if bold_inner else ""
+        status_clean = pub.status.strip()
+        status_tex = tex_plain(status_clean) if status_clean else ""
+        link_clean = pub.link.strip()
+        link_tex = tex_plain(link_clean) if link_clean else ""
+
+        if venue_tex and bold_tex:
+            venue_segment = f"\\textit{{{venue_tex} \\textbf{{{bold_tex}}}}}"
+        elif venue_tex:
+            venue_segment = f"\\textit{{{venue_tex}}}"
+        elif bold_tex:
+            venue_segment = f"\\textbf{{{bold_tex}}}"
+        else:
+            venue_segment = ""
+
+        if status_tex and venue_segment:
+            line2 = f"{status_tex} {venue_segment}"
+        elif status_tex:
+            line2 = status_tex
+        elif venue_segment:
+            line2 = venue_segment
+        else:
+            line2 = ""
+        if line2 and not line2.rstrip().endswith("."):
+            line2 += "."
+        if link_tex:
+            sep = " " if line2 else ""
+            line2 = f"{line2}{sep}{link_tex}."
+
+        if authors_line:
+            first_line = f"\\textbf{{{title_tex}}}, {authors_line}"
+        else:
+            first_line = f"\\textbf{{{title_tex}}}"
+
+        if line2:
+            body = f"{first_line}\\newline\n{line2}"
+        else:
+            body = first_line
+        lines.append(f"\\item[]\\small{{{body}}}")
+    lines.append("\\resumeSubHeadingListEnd")
+    return "\n".join(lines) + "\n"
+
+
 def render_skills(sk: SkillsBlock) -> str:
     lang = _join_skill_line(sk.languages)
     fw = _join_skill_line(sk.frameworks)
@@ -350,6 +442,30 @@ def resume_data_to_source_text(data: ResumeData) -> str:
                     lines.append(f"- {b.strip()}")
             lines.append("")
 
+    if data.publications:
+        lines.append("=== PUBLICATIONS ===")
+        for pub in data.publications:
+            if pub.title.strip():
+                lines.append(f"Title: {pub.title.strip()}")
+            authors_clean = [a.strip() for a in pub.authors if isinstance(a, str) and a.strip()]
+            if authors_clean:
+                lines.append(f"Authors: {', '.join(authors_clean)}")
+            if pub.self_name.strip():
+                lines.append(f"Self: {pub.self_name.strip()}")
+            if pub.venue.strip():
+                lines.append(f"Venue: {pub.venue.strip()}")
+            if pub.venue_short.strip():
+                lines.append(f"VenueShort: {pub.venue_short.strip()}")
+            if pub.year.strip():
+                lines.append(f"Year: {pub.year.strip()}")
+            if pub.type.strip():
+                lines.append(f"Type: {pub.type.strip()}")
+            if pub.status.strip():
+                lines.append(f"Status: {pub.status.strip()}")
+            if pub.link.strip():
+                lines.append(f"Link: {pub.link.strip()}")
+            lines.append("")
+
     if data.projects:
         lines.append("=== PROJECTS ===")
         for proj in data.projects:
@@ -396,6 +512,9 @@ def build_latex_document(data: ResumeData, *, preamble: str | None = None) -> st
     exp = render_experience(data.experience)
     if exp:
         body_parts.append(exp)
+    pubs = render_publications(data.publications)
+    if pubs:
+        body_parts.append(pubs)
     proj = render_projects(data.projects)
     if proj:
         body_parts.append(proj)

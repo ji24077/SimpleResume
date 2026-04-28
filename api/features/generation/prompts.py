@@ -246,6 +246,20 @@ CRITICAL — LaTeX body shape (after the TEMPLATE marker line):
 
    **CRITICAL list nesting:** After ``\\section{Education}``, ``\\section{Experience}``, or ``\\section{Projects}`` you MUST have ``\\resumeSubHeadingListStart`` before the first ``\\resumeSubheading``, ``\\resumeProjectHeading``, or ``\\resumeItemListStart``. Never place ``\\resumeItemListStart`` directly after ``\\resumeSubHeadingListStart`` without a ``\\resumeSubheading`` or ``\\resumeProjectHeading`` line in between (pdfLaTeX often stops at ``\\resumeItemListStart`` with an interactive prompt).
 
+4b) Publications (only if the source has a Publications / Pubs / Selected Publications section — otherwise skip this block entirely):
+   Use existing macros only (no preamble change). Each publication is one ``\\item[]\\small{...}`` row inside ``\\resumeSubHeadingListStart`` … ``\\resumeSubHeadingListEnd``.
+   EXACTLY:
+   \\section{Publications}
+   \\resumeSubHeadingListStart
+     \\item[]\\small{\\textbf{Paper Title}, A1, A2, \\textbf{Self Name}, A4\\newline
+     Status \\textit{Full Venue Name \\textbf{ShortVenue Year}}. arXiv:0000.00000.}
+   \\resumeSubHeadingListEnd
+   - Bold the candidate's own name in the author list (match by header.name or initial form).
+   - Italic outer wraps the venue; the abbreviation/year is bolded inside the italic.
+   - Status prefixes (``Under review at``, ``Accepted at``, ``Published in``, ``To appear at``) come from the source — never invent.
+   - Link goes last (arXiv id, DOI, or URL); render plain (no \\href wrap unless the source already provided a clickable URL).
+   - **Never** invent papers, venues, or authors. If unsure, omit the block entirely.
+
 5) Projects (if any) — **CRITICAL (compile will fail if skipped):**
    \\resumeProjectHeading uses \\item[] internally, so it MUST sit inside \\resumeSubHeadingListStart … \\resumeSubHeadingListEnd
    (same outer wrapper as Education/Experience). Never put \\resumeProjectHeading directly under \\section{Projects} with no wrapper.
@@ -648,6 +662,19 @@ resume_data MUST match this shape (all string fields plain text; no LaTeX):
       "bullets": ["At least one bullet per entry."]
     }
   ],
+  "publications": [
+    {
+      "title": "Paper title (no trailing comma in the field itself).",
+      "authors": ["X. Shan", "H. Shen", "A. Anand", "Z. Tu"],
+      "self_name": "A. Anand",
+      "venue": "European Conference on Computer Vision",
+      "venue_short": "ECCV 2026",
+      "year": "2026",
+      "type": "conference",
+      "status": "Under review at",
+      "link": "arXiv:2603.14957"
+    }
+  ],
   "projects": [
     {"name": "Project", "date": "", "tech_line": "Python, FastAPI", "bullets": ["..."]}
   ],
@@ -664,6 +691,7 @@ Rules:
 - Every experience entry MUST have a non-empty bullets array. For longer roles (>4 months): preserve the EXACT bullet count from the source (if a role has 8 bullets, output 8 strings). For short stints (≤4 months / internships): 3–5 strings. **100%** of sourced facts (metrics, technologies, systems, scope) must appear across those strings (merge **only** true duplicate facts); fewer strings only if the source is genuinely thin. Each string should be **one or two sentences** of plain text (substantive), not a 3–5 word tag—unless the source is genuinely one fact.
 - Project bullets: **2–4** strings when the source describes work (same substance rule).
 - skills must be present; at least one of languages, frameworks, or tools must list a non-empty string.
+- publications: only populate if the source has a Publications / Pubs / Selected Publications section. Copy each entry verbatim—do NOT invent papers, venues, authors, or years. Set ``self_name`` to whichever author string in ``authors`` matches the candidate (i.e. matches ``header.name`` or its initial form like ``A. Anand``); leave empty if not detectable. Use ``venue_short`` for abbreviations or year tags (e.g. ``"ECCV 2026"``); ``venue`` for the full name. ``status`` carries leading phrases like ``"Under review at"``, ``"Accepted at"``, ``"Published in"``, ``"To appear at"``. ``link`` carries the arXiv id, DOI, or URL exactly as written in the source. If the source has no publications section, return ``[]``.
 """
 
 
@@ -846,6 +874,7 @@ Strict rules:
 - Empty string ("") for missing scalar fields. Empty array ([]) for missing list fields.
 - Bullets are plain strings — strip leading bullet glyphs (•, -, *, →) and surrounding whitespace, but keep the sentence intact.
 - Group skills by the source's own categories where possible (Languages / Frameworks / Tools); if the source uses other categories, place items in the closest bucket and do not drop any.
+- **Publications:** if the source has a Publications / Pubs / Selected Publications section, populate ``publications`` (see schema). For each entry: copy the title verbatim into ``title``; split the author byline on commas into ``authors`` (preserve order); set ``self_name`` to whichever author matches ``header.name`` (or its initial form like ``A. Anand``) — leave empty if not detectable. Italic full venue name → ``venue``; bold abbreviation/year (e.g. ``ECCV 2026``) → ``venue_short``. Leading phrases like ``"Under review at"``, ``"Accepted at"``, ``"Published in"``, ``"To appear at"`` → ``status``. arXiv id, DOI, or URL → ``link``. **Do not invent** any field. If the source has no publications, return ``[]``.
 - If the source has a USER-SUPPLIED CONTACT block, those values override anything else for header.email / header.phone / header.links.
 - Do NOT split one source bullet into multiple bullets, and do NOT merge two source bullets into one.
 - ASCII output preferred for visible prose; preserve Unicode only if it is clearly meaningful (e.g., a name with accents).

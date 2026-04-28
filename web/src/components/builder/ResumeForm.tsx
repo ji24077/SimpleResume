@@ -5,6 +5,7 @@ import EducationSection from "./EducationSection";
 import ExperienceSection from "./ExperienceSection";
 import HeaderSection from "./HeaderSection";
 import ProjectsSection from "./ProjectsSection";
+import PublicationsSection from "./PublicationsSection";
 import SectionAccordion from "./SectionAccordion";
 import SkillsSection from "./SkillsSection";
 
@@ -81,6 +82,13 @@ export default function ResumeForm({
           <ExperienceSection
             experience={value.experience}
             onChange={(experience) => onChange({ ...value, experience })}
+          />
+        </SectionAccordion>
+
+        <SectionAccordion title="Publications" count={value.publications.length}>
+          <PublicationsSection
+            publications={value.publications}
+            onChange={(publications) => onChange({ ...value, publications })}
           />
         </SectionAccordion>
 
